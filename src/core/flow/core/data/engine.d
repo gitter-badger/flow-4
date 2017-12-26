@@ -204,7 +204,7 @@ mixin template data() {
     override @property string dataType() {return __flowutil.fqn!(typeof(this));}
     
     shared static this() {
-		static if(__flowutil.fqn!(typeof(super)) != "flow.core.data.engine.Data")
+		static if(__flowutil.fqn!(typeof(super)) != __flowutil.fqn!Data)
             foreach(n, i; super.Properties)
                 Properties[n] = i;
     }

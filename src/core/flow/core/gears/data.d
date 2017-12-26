@@ -1,5 +1,9 @@
 module flow.core.gears.data;
 
+/*template getAAValueType(T) if (is(T : V[K], V, K)) { static if (is(T : V[K], V, K)) alias getAAValueType = V; }
+string[int] aa;
+pragma(msg, getAAValueType!(typeof(aa)));*/
+
 private import flow.core.data.engine;
 private import flow.core.data.data;
 
@@ -62,7 +66,7 @@ class SpaceMeta : Data {
 }
 
 /// info of a junction
-class JunctionInfo : IdData {
+class JunctionInfo : Data {
     mixin data;
 
     /// space of junction (set by space when creating junction)
@@ -107,19 +111,40 @@ class JunctionInfo : IdData {
 }
 
 /// metadata of a junction
-class JunctionMeta : Data {
-    private import std.uuid : UUID;
-
+class JunctionMeta : IdData {
     mixin data;
 
-    // id used for internal identification
-    mixin field!(UUID, "id");
     mixin field!(JunctionInfo, "info");
     mixin field!(string, "type");
     mixin field!(ushort, "level");
 
     /// path to private RSA key (no key disables encryption and authentication)
     mixin field!(string, "key");
+}
+
+class MeshJunctionInfo : JunctionInfo {
+    mixin data;
+
+    mixin field!(string, "addr");
+}
+
+class MeshConnectorMeta : Data {
+    mixin data;
+
+    mixin field!(string, "type");
+}
+
+class MeshJunctionMeta : JunctionMeta {
+    import flow.core.data;
+
+    mixin data;
+
+    mixin field!(string[], "known");
+    mixin field!(size_t, "timeout");
+    mixin field!(size_t, "ackTimeout");
+    mixin field!(size_t, "ackInterval");
+
+    mixin field!(MeshConnectorMeta, "conn");
 }
 
 /// metadata of an entity

@@ -15,7 +15,7 @@ abstract class StateMachine(T) if (isScalarType!T) {
     private import core.sync.rwmutex : ReadWriteMutex;
 
     private ReadWriteMutex _lock;
-    protected @property ReadWriteMutex lock(){return this._lock;}
+    /*protected */@property ReadWriteMutex lock(){return this._lock;}
     private T _state;
 
     /// actual state
@@ -42,13 +42,13 @@ abstract class StateMachine(T) if (isScalarType!T) {
                     oldState = this._state;
                     this._state = value;
                 }
-        
-                if(allowed)
-                    this.onStateChanged(oldState, this._state);
-                else
-                    throw new StateRefusedException(string.init, null, [error]);
             }
         }
+
+        if(allowed)
+            this.onStateChanged(oldState, this._state);
+        else
+            throw new StateRefusedException(string.init, null, [error]);
     }
 
     protected this() {

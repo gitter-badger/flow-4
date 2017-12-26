@@ -566,7 +566,7 @@ version(unittest) {
     }
 }
 
-unittest { test.header("aspects.control: freeze space; trusted sender");
+/*unittest { test.header("aspects.control: freeze space; trusted sender");
     import core.thread;
     import flow.core.util;
 
@@ -1321,4 +1321,4 @@ unittest { test.header("aspects.control: entity snap; untrusted sender");
     auto ra = spc.get("requesting").aspects[0].as!TestControllerAspect;
     assert(ra.response.as!EntitySnapInfo is null, "snap was confirmed");
     assert(ra.response.as!RefusedEntitySnapInfo !is null, "snap wasn't refused");
-test.footer(); }
+test.footer(); }*/

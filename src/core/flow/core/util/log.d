@@ -20,13 +20,7 @@ final class Log {
     public static immutable sep = newline~"--------------------------------------------------"~newline;
 
     /// chosen log level
-    public shared static LL logLevel = LL.Message | LL.Fatal | LL.Error | LL.Warning;
-
-    private static string get(string str) {
-        if(str != string.init)
-            return str~newline~"    ";
-        else return string.init;
-    }
+    public shared static LL logLevel = LL.Warning;
 
     private static string get(Throwable thr) {
         import flow.core.data.json : json;
@@ -37,7 +31,7 @@ final class Log {
         string str;
 
         if(thr !is null) {
-            str ~= thr.file~":"~thr.line.to!string;
+            str ~= sep~thr.file~":"~thr.line.to!string;
 
             if(thr.msg != string.init)
                 str ~= "("~thr.msg~newline~")";
@@ -58,7 +52,7 @@ final class Log {
     private static string get(Data d) {
         import flow.core.data.json : json;
 
-        return Log.sep~(d !is null ? d.json(true) : "NULL");
+        return d !is null ? Log.sep~d.json(true) : string.init;
     }
 
     /// log a message
@@ -100,7 +94,7 @@ final class Log {
         import std.traits : isArray;
 
         if(level <= logLevel) {
-            string str = Log.get(msg);
+            string str = msg;
             str ~= Log.get(thr);
             static if(isArray!DT) {
                 foreach(d; dIn)

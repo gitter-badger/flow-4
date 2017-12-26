@@ -216,17 +216,22 @@ final class Lib : Build {
 
     static void test() {
         foreach(n, l; Lib.reg)
-            l.doTest();
+            if(!l.tested)
+                l.doTest();
     }
+
+    bool tested;
 
     bool isShared;
     bool genIfc;
+    bool shouldTest;
     
-    this(string n, string m, bool s, bool i, string j) {
+    this(string n, string m, bool s, bool i, bool t, string j) {
         super(n, m, j);
 
-        //this.isShared = s;
+        this.isShared = s;
         this.genIfc = i;
+        this.shouldTest = t;
     }
 
     @property string of() {
@@ -237,7 +242,7 @@ final class Lib : Build {
 
     @property string tof() {
         return rootDir.buildPath(
-            "test", "lib", "lib"~this.name~(this.isShared ? sharedExt : staticExt)
+            "test", "lib", "lib"~this.name~staticExt
         );
     }
 
@@ -245,6 +250,15 @@ final class Lib : Build {
         return rootDir.buildPath(
             "test", this.name~binExt
         );
+    }
+
+    final void testDeps() {
+        foreach(d; this.deps) {
+            assert(d in Lib.reg, "!!! dependecy \""~d~"\" of \""~this.name~"\" not found");
+            
+            if(!Lib.reg[d].tested)
+                Lib.reg[d].doTest();
+        }
     }
 
     string[] getDepCflags() {
@@ -263,8 +277,8 @@ final class Lib : Build {
             flags ~= Lib.reg[d].getDepLflags(test);
 
         flags ~= this.getLibLflags();
-        if(this.isShared)
-            flags ~= ["-L-l:"~(test ? this.tof.baseName : this.of.baseName)];
+        if(this.isShared && !test)
+            flags ~= ["-L-l:"~this.of.baseName];
         else flags ~= test ? this.tof : this.of;
 
         return flags;
@@ -301,7 +315,7 @@ final class Lib : Build {
         flags ~= this.getLibLflags();
 
         if(!bin) {
-            if(this.isShared) flags ~= "-shared";
+            if(this.isShared && !test) flags ~= "-shared";
             else flags ~= "-lib";
         }
 
@@ -323,7 +337,8 @@ final class Lib : Build {
         if(!this.clean) {
             this.compile(this.of, this.getCflags(), this.getLflags());
             this.compile(this.tof, this.getCflags(false, true), this.getLflags(false, true));
-            this.compile(this.tbof, this.getCflags(true, true), this.getLflags(true, true));
+            if(this.shouldTest)
+                this.compile(this.tbof, this.getCflags(true, true), this.getLflags(true, true));
         } else writeln("+++ up to date");
 
         this.done = true;
@@ -332,8 +347,13 @@ final class Lib : Build {
     void doTest() {
         import std.stdio : writeln;
 
-        writeln("*** testing \""~this.name~"\"");
-        this.run(this.tbof);
+        this.testDeps();
+
+        if(this.shouldTest) {
+            writeln("*** testing \""~this.name~"\"");
+            this.run(this.tbof);
+            this.tested = true;
+        }
     }
 }
 
@@ -396,7 +416,7 @@ void loadLibs() {
     foreach(j; jsons) {
         auto name = j.baseName(".lib.json");
         writeln("*** adding library ", name);
-        Lib.reg[name] = new Lib(name, j.dirName.buildPath(name), false, false, j.readText);
+        Lib.reg[name] = new Lib(name, j.dirName.buildPath(name), false, false, false, j.readText);
     }
 }
 
@@ -410,7 +430,7 @@ void loadCore() {
         auto j = jsons.front;
         auto name = "core";
         writeln("*** adding flow core");
-        Lib.reg[name] = new Lib(name, j.dirName.buildPath(name), true, true, j.readText);
+        Lib.reg[name] = new Lib(name, j.dirName.buildPath(name), true, true, true, j.readText);
     }
 }
 
@@ -421,7 +441,7 @@ void loadExts() {
     foreach(j; jsons) {
         auto name = j.baseName(".ext.json");
         writeln("*** adding extension ", name);
-        Lib.reg[name] = new Lib(name, j.dirName.buildPath(name), true, true, j.readText);
+        Lib.reg[name] = new Lib(name, j.dirName.buildPath(name), true, true, true, j.readText);
     }
 }
 

@@ -67,7 +67,7 @@ unittest { test.header("aspects.store: in control");
     if(target.exists) target.remove;
     spc.tick();
 
-    Thread.sleep(20.msecs);
+    Thread.sleep(50.msecs);
 
     assert(target.exists, "entity wasn't stored");
 
@@ -103,7 +103,7 @@ unittest { test.header("aspects.store: not in control");
     if(target.exists) target.remove;
     spc.tick();
 
-    Thread.sleep(20.msecs);
+    Thread.sleep(50.msecs);
 
     assert(!target.exists, "entity stored even tick wasn't in control");
 

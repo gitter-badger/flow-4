@@ -461,7 +461,7 @@ unittest
                         mutex.m_numQueuedWriters == queuedWriters)
                         break;
                 }
-                Thread.yield();
+                //Thread.yield();
             }
         }
 

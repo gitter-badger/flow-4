@@ -111,32 +111,61 @@ class UnicastSendingTestTick : Tick { // only derriving from Tick
     override bool accept() {return true;}
 
     /** since tick functionality itself could also crash.
-    if a crash should cause entity to freeze,
-    just ignore it. otherwise catch the throwable */
-    override void error(Throwable thr) {}
+    if a crash should cause entity to get damaged and freezed,
+    just do not override it(super.error is doing what you see here.
+    otherwise override it to catch the throwable */
+    override void error(Throwable thr) {throw thr;}
 
     /** assigns space to deliver an unicast to configured entity in its space.
     it notes if signal was accepted into aspect.unicast */
     override void run() {
-        auto asp = this.aspect!TestSendingAspect;
-        asp.unicast = this.send(new TestUnicast, asp.dstEntity, asp.dstSpace);
+        import core.thread : Thread;
+        import core.time : msecs;
+        auto a = this.aspect!TestSendingAspect;
+
+        /* when communicating via junctions other
+        peers net to get known what might take a time */
+        for(auto i = 0; i < 5; i++) {
+            if(this.send(new TestUnicast, a.dstEntity, a.dstSpace)) {
+                a.unicast = true;
+                break;
+            }
+            Thread.sleep(5.msecs);
+        }
     }
 }
 
 /** ... */
 class AnycastSendingTestTick : Tick {
     override void run() {
-        auto asp = this.aspect!TestSendingAspect;
-        asp.anycast = this.send(new TestAnycast, asp.dstSpace);
+        import core.thread : Thread;
+        import core.time : msecs;
+        auto a = this.aspect!TestSendingAspect;
+
+        for(auto i = 0; i < 5; i++) {
+            if(this.send(new TestAnycast, a.dstSpace)) {
+                a.anycast = true;
+                break;
+            }
+            Thread.sleep(5.msecs);
+        }
     }
 }
-
 
 /** ... */
 class MulticastSendingTestTick : Tick {
     override void run() {
-        auto asp = this.aspect!TestSendingAspect;
-        asp.multicast = this.send(new TestMulticast, asp.dstSpace);
+        import core.thread : Thread;
+        import core.time : msecs;
+        auto a = this.aspect!TestSendingAspect;
+
+        for(auto i = 0; i < 5; i++) {
+            if(this.send(new TestMulticast, a.dstSpace)) {
+                a.multicast = true;
+                break;
+            }
+            Thread.sleep(5.msecs);
+        }
     }
 }
 

@@ -6,20 +6,17 @@ private import flow.core.gears.engine;
 private import flow.core.util;
 private import std.uuid;
 
-/// metadata of in process junction
-class InProcessJunctionMeta : JunctionMeta {
-    private import std.uuid : UUID;
-
-    mixin data;
-}
-
-class InProcessChannel : Channel {
-    private bool master;
-    private InProcessChannel peer;
+private class InProcessChannel : Channel {
+    bool master;
+    InProcessChannel peer;
 
     override @property InProcessJunction own() {
         import flow.core.util : as;
         return super.own.as!InProcessJunction;
+    }
+
+    override @property ubyte[] auth() {
+        return this.peer.own.auth;
     }
 
     this(InProcessJunction own, InProcessJunction recv, InProcessChannel peer = null) {
@@ -35,28 +32,17 @@ class InProcessChannel : Channel {
     }
 
     override protected void dispose() {
-        import core.memory : GC;
-        if(this.master) {
-            this.peer.dispose(); GC.free(&this.peer);
-        }
-
-        this.own.unregister(this);
-
         super.dispose();
     }
-
-    override protected ubyte[] reqAuth() {
-        return this.peer.getAuth();
-    }
     
-    override protected bool reqVerify(ref ubyte[] auth) {
-        return this.peer.verify(auth);
+    override protected bool reqVerify() {
+        return this.peer.verify();
     }
 
     override protected bool transport(ref ubyte[] pkg) {
         import flow.core.util : as;
 
-        return this.peer.pull(pkg, this.own.meta.info);
+        return this.peer.pull(pkg);
     }
 }
 
@@ -71,9 +57,9 @@ class InProcessJunction : Junction {
     private ReadWriteMutex cLock;
     private InProcessChannel[string] channels;
 
-    override @property InProcessJunctionMeta meta() {
-        import flow.core.util : as;
-        return super.meta.as!InProcessJunctionMeta;
+    // make it visible to module
+    override @property JunctionMeta meta() {
+        return super.meta;
     }
 
     /// instances with the same id belong to the same junction
@@ -104,17 +90,19 @@ class InProcessJunction : Junction {
     
     /// unregister a channel passing junction
     private void unregister(InProcessChannel c) {
-        if(this.id in pool) // if is up
-            this.channels.remove(c.dst);
+        import core.memory : GC;
+        this.channels.remove(c.dst);
+        c.dispose(); GC.free(&c);
     }
 
     override bool up() {
         import flow.core.util : as;
 
+        auto spc = this.meta.info.space;
         synchronized(pLock)
-            if(this.id !in pool) // if is down
+            if(this.id !in pool || spc !in pool[this.id]) // if is down
                 synchronized(this.cLock)
-                    pool[this.id][this.meta.info.space] = this.as!(shared(InProcessJunction));
+                    pool[this.id][spc] = this.as!(shared(InProcessJunction));
 
         return true;
     }
@@ -124,10 +112,11 @@ class InProcessJunction : Junction {
         synchronized(pLock) {
             synchronized(this.cLock)
                 foreach(dst, c; this.channels)
-                    if(c.master) {c.dispose(); GC.free(&c);}
+                    if(c.master) this.unregister(c);
 
+            auto spc = this.meta.info.space;
             if(this.id in pool)
-                pool[this.id].remove(this.meta.info.space);
+                pool[this.id].remove(spc);
         }
     }
 
@@ -137,14 +126,15 @@ class InProcessJunction : Junction {
         synchronized(pLock.reader)
             synchronized(this.lock.reader)
                 synchronized(this.cLock.reader) {
-                    if(dst in pool[this.id]) {
-                        if(dst in this.channels)
+                    if(dst in this.channels) {
+                        if(dst in pool[this.id])
                             return this.channels[dst];
-                        else {
-                            auto recv = pool[this.id][dst];
-                            auto chan = new InProcessChannel(this.as!InProcessJunction, recv.as!InProcessJunction);
-                            return chan.handshake() ? chan : null;
-                        }
+                        else this.unregister(this.channels[dst]);
+                    }
+                    else if(dst in pool[this.id]) {
+                        return new InProcessChannel(
+                            this.as!InProcessJunction,
+                            pool[this.id][dst].as!InProcessJunction);
                     }
                 }
 
@@ -156,9 +146,25 @@ class InProcessJunction : Junction {
 JunctionMeta addInProcJunction(
     SpaceMeta sm,
     UUID id,
-    ushort level = 0
+    ushort level = 0,
+    bool hiding = false,
+    bool indifferent = false,
+    bool introvert = false
 ) {
-    return sm.addInProcJunction(id, level, false, false, false);
+    import flow.core.util : as;
+    
+    auto jm = sm.addJunction(
+        id,
+        fqn!JunctionMeta,
+        fqn!JunctionInfo,
+        fqn!InProcessJunction,
+        level,
+        hiding,
+        indifferent,
+        introvert
+    );
+
+    return jm;
 }
 
 /// creates metadata for an in process junction 
@@ -170,43 +176,18 @@ JunctionMeta createInProcJunction(
     bool indifferent = false,
     bool introvert = false
 ) {
-    import flow.core.gears.inproc : InProcessJunctionMeta;
     import flow.core.util : as;
     
     auto jm = createJunction(
-        "flow.core.gears.inproc.InProcessJunctionMeta",
-        "flow.core.gears.inproc.InProcessJunction",
+        id,
+        fqn!JunctionMeta,
+        fqn!JunctionInfo,
+        fqn!InProcessJunction,
         level,
         hiding,
         indifferent,
         introvert
-    ).as!InProcessJunctionMeta;
-    jm.id = id;
-
-    return jm;
-}
-
-/// creates metadata for an in process junction and appeds it to a spaces metadata 
-JunctionMeta addInProcJunction(
-    SpaceMeta sm,
-    UUID id,
-    ushort level,
-    bool hiding,
-    bool indifferent,
-    bool introvert
-) {
-    import flow.core.gears.inproc : InProcessJunctionMeta;
-    import flow.core.util : as;
-    
-    auto jm = sm.addJunction(
-        "flow.core.gears.inproc.InProcessJunctionMeta",
-        "flow.core.gears.inproc.InProcessJunction",
-        level,
-        hiding,
-        indifferent,
-        introvert
-    ).as!InProcessJunctionMeta;
-    jm.id = id;
+    );
 
     return jm;
 }
@@ -249,7 +230,7 @@ unittest { test.header("gears.inproc: fully enabled passing of signals");
     spc2.tick();
     spc1.tick();
 
-    Thread.sleep(10.msecs);
+    Thread.sleep(50.msecs);
 
     spc2.freeze();
     spc1.freeze();
@@ -303,7 +284,7 @@ unittest { test.header("gears.inproc: hiding (not) passing of signals");
     spc2.tick();
     spc1.tick();
 
-    Thread.sleep(10.msecs);
+    Thread.sleep(50.msecs);
 
     spc2.freeze();
     spc1.freeze();
@@ -360,7 +341,7 @@ unittest { test.header("gears.inproc: indifferent (not) passing of signals");
     spc2.tick();
     spc1.tick();
 
-    Thread.sleep(10.msecs);
+    Thread.sleep(50.msecs);
 
     spc2.freeze();
     spc1.freeze();
@@ -417,7 +398,7 @@ unittest { test.header("gears.inproc: introvert (not) passing of signals");
     spc2.tick();
     spc1.tick();
 
-    Thread.sleep(10.msecs);
+    Thread.sleep(50.msecs);
 
     spc2.freeze();
     spc1.freeze();

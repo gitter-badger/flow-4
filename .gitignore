@@ -35,3 +35,4 @@ __test__library__
 # Build
 make
 make.o
+*.o

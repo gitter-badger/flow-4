@@ -314,9 +314,21 @@ string logPrefix(Tick t) {
 }
 
 /// gets the prefix string of junctions for logging
-string logPrefix(Junction t) {
+string logPrefix(Channel c) {
     import std.conv : to;
-    return "junction("~t.meta.info.id.to!string~"): ";
+    return "channel("~c.own.meta.id.to!string~"->"~c.dst~"): ";
+}
+
+/// gets the prefix string of junctions for logging
+string logPrefix(Junction j) {
+    import std.conv : to;
+    return "junction("~j.meta.id.to!string~"): ";
+}
+
+/// gets the prefix string of junctions for logging
+string logPrefix(Space s) {
+    import std.conv : to;
+    return "space("~s.meta.id.to!string~"): ";
 }
 
 private TickMeta createTickMeta(string type, UUID group = UUID.init) {
@@ -1043,7 +1055,7 @@ class EntityController {
     }
 }
 
-private enum JunctionState {
+enum JunctionState {
     Detached,
     Attached
 }
@@ -1052,8 +1064,10 @@ abstract class Channel {
     private string _dst;
     private Junction _own;
     private JunctionInfo _other;
+    private bool _verified; // just telling that handshake was done not if it was successful
 
     protected @property Junction own() {return this._own;}
+    abstract @property ubyte[] auth();
 
     @property string dst() {return this._dst;}
     @property JunctionInfo other() {return this._other;}
@@ -1063,85 +1077,73 @@ abstract class Channel {
         this._own = own;
     }
 
-    final protected ubyte[] getAuth() {
-        import flow.core.data : pack;
-
-        ubyte[] auth = null;
-        if(!this.own.meta.info.hiding) {
-            import flow.core.data : bin;
-
-            if(this.own.meta.key != string.init) {
-                auto info = this.own.meta.info.bin;
-                auto sig = this.own.crypto.sign(info);
-                // indicate it's signed, append signature and data
-                auth = sig.pack~info.pack;
-            }
-        }
-        return auth;
+    private void ensureHandshake() {
+        synchronized if(!this._verified)
+            this.handshake();
     }
 
-    final bool handshake() {
+    final void handshake() {
         import std.range : empty, front;
 
-        auto auth = this.getAuth();
-
         // establish channel only if both side verifies
-        if(this.reqVerify(auth)) {
+        if(this.reqVerify()) {
             // authentication was accepted so authenticate the peer
-            auto otherAuth = this.reqAuth();
-            if(this.verify(otherAuth))
-                return true;
+            if(this.verify()) {
+                Log.msg(LL.Message, this.own.logPrefix~"handshake between \""~this.own.meta.info.space~"\" and \""~this.dst~"\" succeeded");
+            } else {
+                Log.msg(LL.Message, this.own.logPrefix~"handshake between \""~this.own.meta.info.space~"\" and \""~this.dst~"\" failed");
+            }
         }
 
-        return false;
+        this._verified = true;
     }
 
-    final bool verify(/*w/o ref*/ ubyte[] auth) {
+    final bool verify() {
         import flow.core.data : unbin, unpack;
         import std.range : empty, front;
         
-        // own is not authenticating
-        if((auth is null || auth.empty) && !this.own.meta.info.checking) {
-            this._other = new JunctionInfo;
-            this._other.space = this._dst;
-            
-            return true;
-        } else {
-            auto sig = auth.unpack;
-            auto infoData = auth.unpack;
-            auto info = infoData.unbin!JunctionInfo;
+        auto auth = this.auth.dup;
+        auto sig = auth.unpack;
+        auto infoData = auth.unpack;
+        auto info = infoData.unbin!JunctionInfo;
 
+        if(sig !is null)
             this.own.crypto.add(this._dst, info.crt);
+        /* if without signature it might be fake,
+        ensure that noone could think its trustworthy */
+        else info.crt = string.init;
 
-            // if peer signed then there has to be a crt there too
-            auto sigOk = sig !is null && this.own.crypto.verify(infoData, sig, this._dst);
-            auto checkOk = !info.crt.empty && this.own.crypto.check(info.space);
+        // if peer signed then there has to be a crt there too
+        auto sigOk = sig !is null && this.own.crypto.verify(infoData, sig, this._dst);
+        auto checkOk = !info.crt.empty && this.own.crypto.check(info.space);
 
-            if((sig is null || sigOk) && (!this.own.meta.info.checking || checkOk)){
-                this._other = info;
-                return true;
-            } else this.own.crypto.remove(this._dst);
-        }
+        auto r = false;
+        if((sig is null || sigOk) && (!this.own.meta.info.checking || checkOk)){
+            this._other = info;
+            r = true;
+        } else this.own.crypto.remove(this._dst);
+
+        this._verified = true;
         
-        return false;
+        return r;
     }
 
-    protected final bool pull(/*w/o ref*/ ubyte[] pkg, JunctionInfo info) {
+    final bool pull(/*w/o ref*/ ubyte[] pkg) {
         import flow.core.data : unbin, unpack;
 
         if(this._other !is null) {// only if verified
-            if(info.crt !is null) {
-                if(info.encrypting) {// decrypt it
+            if(this._other.crt !is null) {
+                if(this._other.encrypting) {// decrypt it
                     auto data = this.own.crypto.decrypt(pkg, this._dst);
                     auto s = data.unbin!Signal;
-                    return this.own.pull(s, info);
+                    return this.own.pull(s, this._other);
                 }
                 else {// fisrt check signature
                     auto sig = pkg.unpack;
                     return this.own.crypto.verify(pkg, sig, this._dst)
-                        && this.own.pull(pkg.unbin!Signal, info);
+                        && this.own.pull(pkg.unbin!Signal, this._other);
                 }
-            } else return this.own.pull(pkg.unbin!Signal, info);
+            } else return this.own.pull(pkg.unbin!Signal, this._other);
         } else return false;
     }
 
@@ -1163,11 +1165,8 @@ abstract class Channel {
         } else return false;
     }
 
-    /// requests other sides auth
-    abstract protected ubyte[] reqAuth();
-
     /// request authentication
-    abstract protected bool reqVerify(ref ubyte[] auth);
+    abstract protected bool reqVerify();
 
     /// transports signal through channel
     abstract protected bool transport(ref ubyte[] p);
@@ -1187,9 +1186,26 @@ abstract class Junction : StateMachine!JunctionState {
     private Space _space;
     private string[] destinations;
     private Crypto crypto;
+    private ubyte[] _auth;
 
     protected @property JunctionMeta meta() {return this._meta;}
     @property string space() {return this._space.meta.id;}
+
+    @property ubyte[] auth() {
+        if(this._auth is null) {
+            import flow.core.data : pack;
+            import flow.core.data : bin;
+
+            auto info = this.meta.info.bin;
+            ubyte[] sig;
+            if(this.meta.key != string.init)
+                sig = this.crypto.sign(info);
+            // indicate it's signed, append signature and data
+            this._auth = sig.pack~info.pack;
+        }
+
+        return this._auth;
+    }
 
     /// ctor
     this() {
@@ -1264,6 +1280,8 @@ abstract class Junction : StateMachine!JunctionState {
     private bool push(Signal s, Channel c) {
         import flow.core.data : bin;
         
+        c.ensureHandshake();
+
         // channel init might have failed, do not segfault because of that
         if(c.other !is null) {
             synchronized(this.lock.reader)
@@ -1280,16 +1298,17 @@ abstract class Junction : StateMachine!JunctionState {
     }
 
     /// pulls a signal from a channel
-    private bool pull(Signal s, JunctionInfo auth) {
+    private bool pull(Signal s, JunctionInfo src) {
         import flow.core.data : unbin;
 
-        if(s.allowed(auth, this.meta.info)) {
+        if(s.allowed(src, this.meta.info)) {
             /* do not allow measuring of runtimes timings
             ==> make the call async and dada */
             if(this.meta.info.hiding) {
                 taskPool.put(task(&this.route, s));
                 return true;
-            } else return this.route(s);
+            } else
+                return this.route(s);
         } else return false;
     }
 
@@ -1313,7 +1332,7 @@ abstract class Junction : StateMachine!JunctionState {
                     return this.push(s, c);
                 else foreach(j; this.list) {
                     c = this.get(j);
-                    return this.push(s, c);
+                    return c !is null ? this.push(s, c) : false;
                 }
             }
                     
@@ -1330,7 +1349,7 @@ abstract class Junction : StateMachine!JunctionState {
                     ret = this.push(s, c) || ret;
                 else foreach(j; this.list) {
                     c = this.get(j);
-                    ret = this.push(s, c) || ret;
+                    ret = (c !is null ? this.push(s, c) : false) || ret;
                 }
             }
 
@@ -1344,7 +1363,10 @@ abstract class Junction : StateMachine!JunctionState {
             return this._space.route(s.as!Anycast, this.meta.level);
         else if(s.as!Multicast !is null)
             return this._space.route(s.as!Multicast, this.meta.level);
-        else return false;
+        else {
+            Log.msg(LL.Warning, this.logPrefix~"should route unsupported signal -> refused", s);
+            return false;
+        }
     }
 }
 
@@ -1404,6 +1426,7 @@ test.footer(); }
 
 /// hosts a space which can host n entities
 class Space : StateMachine!SystemState {
+    private import core.time : Duration;
     private import std.uuid : UUID;
 
     private SpaceMeta meta;
@@ -1426,6 +1449,7 @@ class Space : StateMachine!SystemState {
             this.freeze();
 
         foreach(i, j; this.junctions) {
+            j.detach();
             j.dispose(); GC.free(&j);
         }
 
@@ -1493,6 +1517,11 @@ class Space : StateMachine!SystemState {
             j._meta = jm;
             j._space = this;
             this.junctions[jm.id] = j;
+            try {
+                j.attach();
+            } catch(Throwable thr) {
+                Log.msg(LL.Error, this.logPrefix~"couldn't attach to junction");
+            }
         }
 
         // creating entities
@@ -1509,9 +1538,6 @@ class Space : StateMachine!SystemState {
         }
     }
     private void onTicking() {
-        foreach(i, j; this.junctions)
-            j.attach();
-
         foreach(e; this.entities)
             e.tick();
     }
@@ -1520,9 +1546,6 @@ class Space : StateMachine!SystemState {
         // freezing happens backwards
         foreach_reverse(e; this.entities.values)
             e.freeze();
-
-        foreach(i, j; this.junctions)
-            j.detach();
     }
 
     /// snapshots whole space (deep clone)
@@ -1753,6 +1776,16 @@ class Space : StateMachine!SystemState {
 
         return ret;
     }
+
+    void join(Duration to = Duration.max) {
+        import core.time : msecs;
+        import core.thread : Thread;
+        import std.datetime.systime : Clock;
+
+        auto time = Clock.currStdTime;
+        while(this.state != SystemState.Frozen || time + to.total!"hnsecs" < Clock.currStdTime)
+            Thread.sleep(5.msecs);
+    }
 }
 
 /** hosts one or more spaces and allows to controll them
@@ -1897,33 +1930,25 @@ TickMeta addTick(EntityMeta em, string type, Data d = null, UUID group = randomU
 /// creates metadata for an junction and appends it to a space
 JunctionMeta addJunction(
     SpaceMeta sm,
-    string type,
+    UUID id,
+    string metaType,
+    string infoType,
     string junctionType,
-    ushort level = 0
+    ushort level = 0,
+    bool hiding = false,
+    bool indifferent = false,
+    bool introvert = false
 ) {
-    auto jm = createJunction(type, junctionType, level, false, false, false);
-    sm.junctions ~= jm;
-    return jm;
-}
-
-/// creates metadata for an junction and appends it to a space
-JunctionMeta addJunction(
-    SpaceMeta sm,
-    string type,
-    string junctionType,
-    ushort level,
-    bool hiding,
-    bool indifferent,
-    bool introvert
-) {
-    auto jm = createJunction(type, junctionType, level, hiding, indifferent, introvert);
+    auto jm = createJunction(id, metaType, infoType, junctionType, level, hiding, indifferent, introvert);
     sm.junctions ~= jm;
     return jm;
 }
 
 /// creates metadata for an junction and appends it to a space
 JunctionMeta createJunction(
-    string type,
+    UUID id,
+    string metaType,
+    string infoType,
     string junctionType,
     ushort level = 0,
     bool hiding = false,
@@ -1934,9 +1959,9 @@ JunctionMeta createJunction(
     import flow.core.util : as;
     import std.uuid : UUID;
     
-    auto jm = createData(type).as!JunctionMeta;
-    jm.id = randomUUID;
-    jm.info = new JunctionInfo;
+    auto jm = createData(metaType).as!JunctionMeta;
+    jm.id = id;
+    jm.info = createData(infoType).as!JunctionInfo;
     jm.type = junctionType;
     
     jm.level = level;
@@ -1991,6 +2016,7 @@ version(unittest) {
     class TestSendingAspect : Data {
         mixin data;
 
+        mixin field!(long, "wait");
         mixin field!(string, "dstEntity");
         mixin field!(string, "dstSpace");
 
@@ -2070,22 +2096,51 @@ version(unittest) {
 
     class UnicastSendingTestTick : Tick {
         override void run() {
+            import core.thread : Thread;
+            import core.time : msecs;
             auto a = this.aspect!TestSendingAspect;
-            a.unicast = this.send(new TestUnicast, a.dstEntity, a.dstSpace);
+
+            /* when communicating via junctions other
+            peers net to get known what might take a time */
+            for(auto i = 0; i < 5; i++) {
+                if(this.send(new TestUnicast, a.dstEntity, a.dstSpace)) {
+                    a.unicast = true;
+                    break;
+                }
+                Thread.sleep(a.wait.msecs);
+            }
         }
     }
 
     class AnycastSendingTestTick : Tick {
         override void run() {
+            import core.thread : Thread;
+            import core.time : msecs;
             auto a = this.aspect!TestSendingAspect;
-            a.anycast = this.send(new TestAnycast, a.dstSpace);
+
+            for(auto i = 0; i < 5; i++) {
+                if(this.send(new TestAnycast, a.dstSpace)) {
+                    a.anycast = true;
+                    break;
+                }
+                Thread.sleep(a.wait.msecs);
+            }
         }
     }
 
     class MulticastSendingTestTick : Tick {
         override void run() {
+            import core.thread : Thread;
+            import core.time : msecs;
             auto a = this.aspect!TestSendingAspect;
-            a.multicast = this.send(new TestMulticast, a.dstSpace);
+
+            for(auto i = 0; i < 5; i++) {
+                if(this.send(new TestMulticast, a.dstSpace)) {
+                    a.multicast = true;
+                    break;
+                }
+                Thread.sleep(a.wait.msecs);
+            }
         }
     }
 

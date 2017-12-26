@@ -19,3 +19,6 @@ class ProcessException : FlowException {mixin exception;}
 
 /// exception indicating something went wrong in junction
 class JunctionException : FlowException {mixin exception;}
+
+/// exception indicating something went wrong in junction
+class ChannelException : FlowException {mixin exception;}

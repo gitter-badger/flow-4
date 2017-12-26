@@ -133,7 +133,7 @@ unittest { test.header("gears.data: dynamic data usage");
     import flow.core.util.templates : as;
     import std.range : empty;
 
-    auto d = "flow.core.data.engine.InheritedTestData".createData().as!InheritedTestData;
+    auto d = fqn!InheritedTestData.createData().as!InheritedTestData;
     assert(d !is null, "could not dynamically create instance of data");
     assert(d.integer is long.init && d.integerA.empty, "data is not initialized correctly at dynamic creation");
 
