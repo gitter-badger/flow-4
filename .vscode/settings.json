@@ -1,3 +1,4 @@
 {
-    "telemetry.enableTelemetry": false
+    "telemetry.enableTelemetry": false,
+    "debug.allowBreakpointsEverywhere": true
 }

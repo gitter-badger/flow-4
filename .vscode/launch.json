@@ -4,81 +4,66 @@
     "configurations": [
         {
             "name": "test/core",
-            "type": "gdb",
+            "type": "cppdbg",
             "request": "launch",
-            "autorun": [
-                "set environment LD_LIBRARY_PATH ${workspaceRoot}/util/dmd2/linux/lib64:${workspaceRoot}/lib",
-                "handle SIGUSR1 nostop noprint",
-                "handle SIGUSR2 nostop noprint",
-                "break onInvalidMemoryOperationError"
-            ],
-            "target": "${workspaceRoot}/test/core",
-            "cwd": "${workspaceRoot}/test"
+            "program": "${workspaceRoot}/test/core",
+            "args": [ ],
+            "environment": [{"name": "LD_LIBRARY_PATH", "value": "${workspaceRoot}/lib"}],
+            "cwd": "${workspaceRoot}"
         },
         {
             "name": "test/ipc-nanomsg",
-            "type": "gdb",
+            "type": "cppdbg",
             "request": "launch",
-            "autorun": [
-                "set environment LD_LIBRARY_PATH ${workspaceRoot}/util/dmd2/linux/lib64:${workspaceRoot}/lib",
-                "handle SIGUSR1 nostop noprint",
-                "handle SIGUSR2 nostop noprint",
-                "break onInvalidMemoryOperationError"
-            ],
-            "target": "${workspaceRoot}/test/ipc-nanomsg",
-            "cwd": "${workspaceRoot}/test"
+            "program": "${workspaceRoot}/test/ipc-nanomsg",
+            "args": [ ],
+            "environment": [{"name": "LD_LIBRARY_PATH", "value": "${workspaceRoot}/lib"}],
+            "cwd": "${workspaceRoot}"
         },
         {
-            "name": "bin/flow-run",
-            "type": "gdb",
+            "name": "test/flow-run",
+            "type": "cppdbg",
             "request": "launch",
-            "autorun": [
-                "set environment LD_LIBRARY_PATH ${workspaceRoot}/util/dmd2/linux/lib64:${workspaceRoot}/lib",
-                "handle SIGUSR1 nostop noprint",
-                "handle SIGUSR2 nostop noprint",
-                "break onInvalidMemoryOperationError"
-            ],
-            "target": "flow-run",
-            "cwd": "${workspaceRoot}/bin",
-            "arguments": "${workspaceRoot}/tmp/cfg/complex/power/1"
+            "program": "${workspaceRoot}/test/flow-run",
+            "args": [ ],
+            "environment": [{"name": "LD_LIBRARY_PATH", "value": "${workspaceRoot}/lib"}],
+            "cwd": "${workspaceRoot}"
         },
         {
             "name": "bin/flow-introduction",
-            "type": "gdb",
+            "type": "cppdbg",
             "request": "launch",
-            "autorun": [
-                "set environment LD_LIBRARY_PATH ${workspaceRoot}/util/dmd2/linux/lib64:${workspaceRoot}/lib",
-                "handle SIGUSR1 nostop noprint",
-                "handle SIGUSR2 nostop noprint",
-                "break onInvalidMemoryOperationError"
-            ],
-            "target": "${workspaceRoot}/bin/flow-introduction",
-            "cwd": "${workspaceRoot}/bin"
+            "program": "${workspaceRoot}/bin/flow-introduction",
+            "args": [ ],
+            "environment": [{"name": "LD_LIBRARY_PATH", "value": "${workspaceRoot}/lib"}],
+            "cwd": "${workspaceRoot}"
         },
         {
             "name": "tmp/test",
-            "type": "gdb",
+            "type": "cppdbg",
             "request": "launch",
-            "autorun": [
-                "set environment LD_LIBRARY_PATH ${workspaceRoot}/util/dmd2/linux/lib64:${workspaceRoot}/lib",
-                "handle SIGUSR1 nostop noprint",
-                "handle SIGUSR2 nostop noprint",
-                "break onInvalidMemoryOperationError"
-            ],
-            "target": "${workspaceRoot}/tmp/test",
-            "cwd": "${workspaceRoot}/tmp"
+            "program": "${workspaceRoot}/tmp/test",
+            "args": [ ],
+            "environment": [{"name": "LD_LIBRARY_PATH", "value": "${workspaceRoot}/lib"}],
+            "cwd": "${workspaceRoot}"
         },
         {
             "name": "make",
-            "type": "gdb",
+            "type": "cppdbg",
             "request": "launch",
-            "autorun": [
-                "handle SIGUSR1 nostop noprint",
-                "handle SIGUSR2 nostop noprint",
-                "break onInvalidMemoryOperationError"
-            ],
-            "target": "${workspaceRoot}/make",
+            "program": "${workspaceRoot}/make",
+            "args": [ ],
+            "environment": [{"name": "LD_LIBRARY_PATH", "value": "${workspaceRoot}/lib"}],
             "cwd": "${workspaceRoot}"
-        }
+        },
+        /*{
+            "name": "test/XXX",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/test/XXX",
+            "args": [ ],
+            "environment": [{"name": "LD_LIBRARY_PATH", "value": "${workspaceRoot}/lib"}],
+            "cwd": "${workspaceRoot}"
+        }*/
     ]
 }
