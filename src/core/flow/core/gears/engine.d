@@ -662,6 +662,8 @@ private class Entity : StateMachine!SystemState {
     }
 
     @property string target() {
+        import std.c.stdlib : getenv;
+        import std.conv : to;
         import std.file : exists;
         import std.path : expandTilde, buildPath;
 
@@ -674,7 +676,7 @@ private class Entity : StateMachine!SystemState {
                 .expandTilde;
         }
         version(Windows) {
-            t = environment.get("APPDATA");
+            t = getenv("APPDATA").to!string;
         }
         t = t.buildPath(this.space.meta.id);
 
@@ -1067,6 +1069,17 @@ enum JunctionState {
     Attached
 }
 
+private struct AuthData {
+    ubyte[] info;
+    ubyte[] sig;
+}
+
+private struct PkgData {
+    bool encrypted;
+    ubyte[] data;
+    ubyte[] sig;
+}
+
 abstract class Channel {
     private string _dst;
     private Junction _own;
@@ -1106,26 +1119,25 @@ abstract class Channel {
     }
 
     final bool verify() {
-        import flow.core.data : unbin, unpack;
+        import msgpack : unpack;
         import std.range : empty, front;
-        
-        auto auth = this.auth.dup;
-        auto sig = auth.unpack;
-        auto infoData = auth.unpack;
-        auto info = infoData.unbin!JunctionInfo;
 
-        if(sig !is null)
+        auto d = this.auth.unpack!AuthData;
+
+        auto info = d.info.unbin!JunctionInfo;
+
+        if(d.sig !is null)
             this.own.crypto.add(this._dst, info.crt);
         /* if without signature it might be fake,
         ensure that noone could think its trustworthy */
         else info.crt = string.init;
 
         // if peer signed then there has to be a crt there too
-        auto sigOk = sig !is null && this.own.crypto.verify(infoData, sig, this._dst);
+        auto sigOk = d.sig !is null && this.own.crypto.verify(d.info, d.sig, this._dst);
         auto checkOk = !info.crt.empty && this.own.crypto.check(info.space);
 
         auto r = false;
-        if((sig is null || sigOk) && (!this.own.meta.info.checking || checkOk)){
+        if((d.sig is null || sigOk) && (!this.own.meta.info.checking || checkOk)){
             this._other = info;
             r = true;
         } else this.own.crypto.remove(this._dst);
@@ -1136,39 +1148,42 @@ abstract class Channel {
     }
 
     final bool pull(/*w/o ref*/ ubyte[] pkg) {
-        import flow.core.data : unbin, unpack;
+        import msgpack : unpack;
+        if(this._other !is null) { // only if verified
+            auto d = pkg.unpack!PkgData;
+            
+            // if other has a crt then (encrypted) data has to be signed correct
+            if(this._other.crt !is null)
+                if(d.sig is null || !this.own.crypto.verify(d.data, d.sig, this._dst))
+                    return false;
 
-        if(this._other !is null) {// only if verified
-            if(this._other.crt !is null) {
-                if(this._other.encrypting) {// decrypt it
-                    auto data = this.own.crypto.decrypt(pkg, this._dst);
-                    auto s = data.unbin!Signal;
-                    return this.own.pull(s, this._other);
-                }
-                else {// fisrt check signature
-                    auto sig = pkg.unpack;
-                    return this.own.crypto.verify(pkg, sig, this._dst)
-                        && this.own.pull(pkg.unbin!Signal, this._other);
-                }
-            } else return this.own.pull(pkg.unbin!Signal, this._other);
+            if(d.encrypted) { // if its encrypted decrypt it
+                d.data = this.own.crypto.decrypt(d.data, this._dst);
+                d.encrypted = false;
+            }
+
+            return this.own.pull(d.data.unbin!Signal, this._other);
         } else return false;
     }
 
     private final bool push(Signal s) {
-        import flow.core.data : bin, pack;
-
+        import msgpack : pack;
         if(this._other !is null) { // only if verified
-            auto pkg = s.bin;
-            if(this.own.meta.key !is null) {
-                if(this.own.meta.info.encrypting) {// encrypt for dst
-                    auto crypt = this.own.crypto.encrypt(pkg, this._dst);
-                    return this.transport(crypt);
-                } else {// sign
-                    auto sig = this.own.crypto.sign(pkg);
-                    auto signed = sig.pack~pkg;
-                    return this.transport(signed);
-                }
-            } else return this.transport(pkg);
+            PkgData d;
+            d.data = s.bin;
+
+            // if own is encrypting, encrypt it
+            if(this.own.meta.info.encrypting) {// encrypt for dst
+                d.data = this.own.crypto.encrypt(d.data, this._dst);
+                d.encrypted = true;
+            }
+
+            // if own has a key, sign it
+            if(this.own.meta.key !is null)
+                d.sig = this.own.crypto.sign(d.data);
+
+            auto pkg = d.pack;
+            return this.transport(pkg);
         } else return false;
     }
 
@@ -1200,15 +1215,15 @@ abstract class Junction : StateMachine!JunctionState {
 
     @property ubyte[] auth() {
         if(this._auth is null) {
-            import flow.core.data : pack;
             import flow.core.data : bin;
+            import msgpack : pack;
 
-            auto info = this.meta.info.bin;
-            ubyte[] sig;
+            AuthData d;
+            d.info = this.meta.info.bin;
             if(this.meta.key != string.init)
-                sig = this.crypto.sign(info);
+                d.sig = this.crypto.sign(d.info);
             // indicate it's signed, append signature and data
-            this._auth = sig.pack~info.pack;
+            this._auth = d.pack;
         }
 
         return this._auth;
@@ -1988,56 +2003,41 @@ version(unittest) {
 
 /// casts for testing
 version(unittest) {
-    class TestUnicast : Unicast {
-        mixin data;
-    }
+    class TestUnicast : Unicast { mixin _data; }
 
-    class TestAnycast : Anycast {
-        mixin data;
-    }
-    class TestMulticast : Multicast {
-        mixin data;
-    }
+    class TestAnycast : Anycast { mixin _data; }
+    class TestMulticast : Multicast { mixin _data; }
 }
 
 /// data of entities
 version(unittest) {
-    class TestEventingAspect : Data {
-        mixin data;
-
-        mixin field!(bool, "firedOnTicking");
-        mixin field!(bool, "firedOnFreezing");
+    class TestEventingAspect : Data { mixin _data;
+        @field bool firedOnTicking;
+        @field bool firedOnFreezing;
     }
 
-    class TestDelayAspect : Data {
+    class TestDelayAspect : Data { mixin _data;
         private import core.time : Duration;
-        private import std.datetime.systime : SysTime;
 
-        mixin data;
-
-        mixin field!(Duration, "delay");
-        mixin field!(SysTime, "startTime");
-        mixin field!(SysTime, "endTime");
+        @field Duration delay;
+        @field long startTime;
+        @field long endTime;
     }
 
-    class TestSendingAspect : Data {
-        mixin data;
+    class TestSendingAspect : Data { mixin _data;
+        @field long wait;
+        @field string dstEntity;
+        @field string dstSpace;
 
-        mixin field!(long, "wait");
-        mixin field!(string, "dstEntity");
-        mixin field!(string, "dstSpace");
-
-        mixin field!(bool, "unicast");
-        mixin field!(bool, "anycast");
-        mixin field!(bool, "multicast");
+        @field bool unicast;
+        @field bool anycast;
+        @field bool multicast;
     }
 
-    class TestReceivingAspect : Data {
-        mixin data;
-
-        mixin field!(Unicast, "unicast");
-        mixin field!(Anycast, "anycast");
-        mixin field!(Multicast, "multicast");
+    class TestReceivingAspect : Data { mixin _data;
+        @field Unicast unicast;
+        @field Anycast anycast;
+        @field Multicast multicast;
     }
 }
 
@@ -2085,7 +2085,7 @@ version(unittest) {
             import std.datetime.systime : Clock;
 
             auto a = this.aspect!TestDelayAspect;
-            a.startTime = Clock.currTime;
+            a.startTime = Clock.currStdTime;
             this.invoke(fqn!DelayedTestTick, a.delay);
         }
     }
@@ -2094,7 +2094,7 @@ version(unittest) {
         override void run() {
             import std.datetime.systime : Clock;
 
-            auto endTime = Clock.currTime;
+            auto endTime = Clock.currStdTime;
 
             auto a = this.aspect!TestDelayAspect;
             a.endTime = endTime;
@@ -2297,11 +2297,10 @@ unittest { test.header("gears.engine: delayed next");
     auto measuredDelay = nsm.entities[0].aspects[0].as!TestDelayAspect.endTime - nsm.entities[0].aspects[0].as!TestDelayAspect.startTime;
     auto hnsecs = delay.total!"hnsecs";
     auto tolHnsecs = hnsecs * 1.05; // we allow +5% (5msecs) tolerance for passing the test
-    auto measuredHnsecs = measuredDelay.total!"hnsecs";
     
-    test.write("delayed ", measuredHnsecs, "hnsecs; allowed ", hnsecs, "hnsecs - ", tolHnsecs, "hnsecs");
-    assert(hnsecs < measuredHnsecs , "delayed shorter than defined");
-    assert(tolHnsecs >= measuredHnsecs, "delayed longer than allowed");
+    test.write("delayed ", measuredDelay, "hnsecs; allowed ", hnsecs, "hnsecs - ", tolHnsecs, "hnsecs");
+    assert(hnsecs < measuredDelay , "delayed shorter than defined");
+    assert(tolHnsecs >= measuredDelay, "delayed longer than allowed");
 test.footer(); }
 
 unittest { test.header("gears.engine: send and receipt of all signal types and pass their group");

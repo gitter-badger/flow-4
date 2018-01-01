@@ -4,24 +4,22 @@ private import flow.core.data;
 private import flow.core.gears;
 private import flow.core.util;
 
-class EntitySpawnRefuseReason : Data {
-    mixin data;
+class EntitySpawnRefuseReason : Data { mixin _data;
 
-    mixin field!(string, "tick");
-    mixin field!(string, "reason");
+    @field string tick;
+    @field string reason;
 }
 
 // to protect aspect you wouldn't want to combine it with other aspects
-class ControllingAspect : Data {
-    mixin data;
+class ControllingAspect : Data { mixin _data;
 
-    mixin field!(EntityPtr[], "trusted");
+    @field EntityPtr[] trusted;
 
-    mixin field!(string, "entitySpawnAnalyzer");
-    mixin field!(EntitySpawnRefuseReason[], "entitySpawnRefuseReasons");
+    @field string entitySpawnAnalyzer;
+    @field EntitySpawnRefuseReason[] entitySpawnRefuseReasons;
 
-    mixin field!(string, "junctionAttachAnalyzer");
-    mixin field!(EntitySpawnRefuseReason[], "junctionAttachRefuseReasons");
+    @field string junctionAttachAnalyzer;
+    @field EntitySpawnRefuseReason[] junctionAttachRefuseReasons;
 }
 
 bool trusts(ControllingAspect a, EntityPtr e) {
@@ -30,7 +28,7 @@ bool trusts(ControllingAspect a, EntityPtr e) {
     return a.trusted.any!((t) => t == e);
 }
 
-class SpaceFreezeRequest : Unicast {mixin data;}
+class SpaceFreezeRequest : Unicast { mixin _data; }
 
 class SpaceFreezeTick : Tick {
     override void run() {
@@ -44,7 +42,7 @@ class SpaceFreezeTick : Tick {
     }
 }
 
-class SpaceStoreRequest : Unicast {mixin data;}
+class SpaceStoreRequest : Unicast { mixin _data; }
 
 class SpaceStoreTick : Tick {
     override void run() {
@@ -58,10 +56,8 @@ class SpaceStoreTick : Tick {
     }
 }
 
-class EntitySpawnRequest : Unicast {
-    mixin data;
-
-    mixin field!(EntityMeta, "data");
+class EntitySpawnRequest : Unicast { mixin _data;
+    @field EntityMeta data;
 }
 
 class EntitySpawnTick : Tick {
@@ -92,10 +88,8 @@ class NullEntitySpawnAnalyzeTick : Tick {
     }
 }
 
-class RefusedEntitySpawnInfo : Unicast {
-    mixin data;
-
-    mixin field!(string, "reason");
+class RefusedEntitySpawnInfo : Unicast { mixin _data;
+    @field string reason;
 }
 
 class RefusedEntitySpawnTick : Tick {
@@ -124,7 +118,7 @@ class RefusedEntitySpawnTick : Tick {
     }
 }
 
-class EntitySpawnedInfo : Unicast {mixin data;}
+class EntitySpawnedInfo : Unicast { mixin _data; }
 
 class AcceptEntitySpawnTick : Tick {
     override void run() {
@@ -141,19 +135,15 @@ class AcceptEntitySpawnTick : Tick {
     }
 }
 
-class EntityKillRequest : Unicast {
-    mixin data;
-
-    mixin field!(EntityPtr, "ptr");
+class EntityKillRequest : Unicast { mixin _data;
+    @field EntityPtr ptr;
 }
 
-class RefusedEntityKillInfo : Unicast {
-    mixin data;
-
-    mixin field!(string, "reason");
+class RefusedEntityKillInfo : Unicast { mixin _data;
+    @field string reason;
 }
 
-class EntityKilledInfo : Unicast {mixin data;}
+class EntityKilledInfo : Unicast { mixin _data; }
 
 class EntityKillTick : Tick {
     override void run() {
@@ -180,10 +170,8 @@ class EntityKillTick : Tick {
     }
 }
 
-class JunctionAttachRequest : Unicast {
-    mixin data;
-
-    mixin field!(JunctionMeta, "data");
+class JunctionAttachRequest : Unicast { mixin _data;
+    @field JunctionMeta data;
 }
 
 class JunctionAttachTick : Tick {
@@ -214,10 +202,8 @@ class NullJunctionAttachAnalyzeTick : Tick {
     }
 }
 
-class RefusedJunctionAttachInfo : Unicast {
-    mixin data;
-
-    mixin field!(string, "reason");
+class RefusedJunctionAttachInfo : Unicast { mixin _data;
+    @field string reason;
 }
 
 class RefusedJunctionAttachTick : Tick {
@@ -246,7 +232,7 @@ class RefusedJunctionAttachTick : Tick {
     }
 }
 
-class JunctionAttachedInfo : Unicast {mixin data;}
+class JunctionAttachedInfo : Unicast { mixin _data; }
 
 class AcceptJunctionAttachTick : Tick {
     override void run() {
@@ -263,21 +249,17 @@ class AcceptJunctionAttachTick : Tick {
     }
 }
 
-class JunctionDetachRequest : Unicast {
+class JunctionDetachRequest : Unicast { mixin _data;
     private import std.uuid : UUID;
 
-    mixin data;
-
-    mixin field!(UUID, "id");
+    @field UUID id;
 }
 
-class RefusedJunctionDetachInfo : Unicast {
-    mixin data;
-
-    mixin field!(string, "reason");
+class RefusedJunctionDetachInfo : Unicast { mixin _data;
+    @field string reason;
 }
 
-class JunctionDetachedInfo : Unicast {mixin data;}
+class JunctionDetachedInfo : Unicast { mixin _data; }
 
 class JunctionDetachTick : Tick {
     override void run() {
@@ -304,25 +286,19 @@ class JunctionDetachTick : Tick {
     }
 }
 
-class EntityMetricsRequest : Unicast {
-    mixin data;
-
-    mixin field!(EntityPtr, "ptr");
+class EntityMetricsRequest : Unicast { mixin _data;
+    @field EntityPtr ptr;
 }
 
-class RefusedEntityMetricsInfo : Unicast {
-    mixin data;
-
-    mixin field!(string, "reason");
+class RefusedEntityMetricsInfo : Unicast { mixin _data;
+    @field string reason;
 }
 
-class EntityMetricsInfo : Unicast {
-    mixin data;
-
-    mixin field!(SystemState, "state");
-    mixin field!(size_t, "count");
-    mixin field!(string, "target");
-    mixin field!(Damage[], "damages");
+class EntityMetricsInfo : Unicast { mixin _data;
+    @field SystemState state;
+    @field size_t count;
+    @field string target;
+    @field Damage[] damages;
 }
 
 class EntityMetricsTick : Tick {
@@ -355,19 +331,15 @@ class EntityMetricsTick : Tick {
     }
 }
 
-class EntityTickRequest : Unicast {
-    mixin data;
-
-    mixin field!(EntityPtr, "ptr");
+class EntityTickRequest : Unicast { mixin _data;
+    @field EntityPtr ptr;
 }
 
-class RefusedEntityTickInfo : Unicast {
-    mixin data;
-
-    mixin field!(string, "reason");
+class RefusedEntityTickInfo : Unicast { mixin _data;
+    @field string reason;
 }
 
-class EntityTickingInfo : Unicast {mixin data;}
+class EntityTickingInfo : Unicast { mixin _data; }
 
 class EntityTickTick : Tick {
     override void run() {
@@ -394,19 +366,15 @@ class EntityTickTick : Tick {
     }
 }
 
-class EntityFreezeRequest : Unicast {
-    mixin data;
-
-    mixin field!(EntityPtr, "ptr");
+class EntityFreezeRequest : Unicast { mixin _data;
+    @field EntityPtr ptr;
 }
 
-class RefusedEntityFreezeInfo : Unicast {
-    mixin data;
-
-    mixin field!(string, "reason");
+class RefusedEntityFreezeInfo : Unicast { mixin _data;
+    @field string reason;
 }
 
-class EntityFrozenInfo : Unicast {mixin data;}
+class EntityFrozenInfo : Unicast { mixin _data; }
 
 class EntityFreezeTick : Tick {
     override void run() {
@@ -433,19 +401,15 @@ class EntityFreezeTick : Tick {
     }
 }
 
-class EntityStoreRequest : Unicast {
-    mixin data;
-
-    mixin field!(EntityPtr, "ptr");
+class EntityStoreRequest : Unicast { mixin _data;
+    @field EntityPtr ptr;
 }
 
-class RefusedEntityStoreInfo : Unicast {
-    mixin data;
-
-    mixin field!(string, "reason");
+class RefusedEntityStoreInfo : Unicast { mixin _data;
+    @field string reason;
 }
 
-class EntityStoredInfo : Unicast {mixin data;}
+class EntityStoredInfo : Unicast { mixin _data; }
 
 class EntityStoreTick : Tick {
     override void run() {
@@ -472,22 +436,16 @@ class EntityStoreTick : Tick {
     }
 }
 
-class EntitySnapRequest : Unicast {
-    mixin data;
-
-    mixin field!(EntityPtr, "ptr");
+class EntitySnapRequest : Unicast { mixin _data;
+    @field EntityPtr ptr;
 }
 
-class RefusedEntitySnapInfo : Unicast {
-    mixin data;
-
-    mixin field!(string, "reason");
+class RefusedEntitySnapInfo : Unicast { mixin _data;
+    @field string reason;
 }
 
-class EntitySnapInfo : Unicast {
-    mixin data;
-
-    mixin field!(EntityMeta, "data");
+class EntitySnapInfo : Unicast { mixin _data;
+    @field EntityMeta data;
 }
 
 class EntitySnapTick : Tick {
@@ -546,12 +504,10 @@ void addControllingAspect(EntityMeta em,
 }
 
 version(unittest) {
-    class TestControllerAspect : Data {
-        mixin data;
-
-        mixin field!(Unicast, "signal");
-        mixin field!(EntityPtr, "controller");
-        mixin field!(Data, "response");
+    class TestControllerAspect : Data { mixin _data;
+        @field Unicast signal;
+        @field EntityPtr controller;
+        @field Data response;
     }
 
     class TestControllerTick : Tick {
@@ -566,7 +522,7 @@ version(unittest) {
     }
 }
 
-/*unittest { test.header("aspects.control: freeze space; trusted sender");
+unittest { test.header("aspects.control: freeze space; trusted sender");
     import core.thread;
     import flow.core.util;
 
@@ -1321,4 +1277,4 @@ unittest { test.header("aspects.control: entity snap; untrusted sender");
     auto ra = spc.get("requesting").aspects[0].as!TestControllerAspect;
     assert(ra.response.as!EntitySnapInfo is null, "snap was confirmed");
     assert(ra.response.as!RefusedEntitySnapInfo !is null, "snap wasn't refused");
-test.footer(); }*/
+test.footer(); }

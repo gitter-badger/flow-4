@@ -5,12 +5,10 @@ private import flow.core.data;
 private import flow.core.gears;
 private import flow.core.util;
 
-class StoringAspect : Data {
-    mixin data;
-
-    mixin field!(Duration, "delay");
-    mixin field!(size_t, "last");
-    mixin field!(bool, "lastStored");
+class StoringAspect : Data { mixin _data;
+    @field Duration delay;
+    @field size_t last;
+    @field bool lastStored;
 }
 
 class CheckStoreTick : Tick {

@@ -9,9 +9,7 @@ hive
 /test
 
 # Crypto
-/util/ssl/*.crt
 /util/ssl/*.csr
-/util/ssl/*.key
 /util/ssl/*.pem
 
 # tmp/cfg
@@ -36,3 +34,5 @@ __test__library__
 make
 make.o
 *.o
+*.obj
+*.pdb

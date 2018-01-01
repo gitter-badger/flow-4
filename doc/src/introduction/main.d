@@ -9,13 +9,13 @@ class TestSendingAspect : Data {
     // mixing data functinality
     /* this is also required when inheriting
     from a custom data type */
-    mixin data;
+    mixin _data;
 
     // creates a field "dstEntity" of string type
     /// this ist some field documentation
     /// <-- NOTICE
     /// id of destination entity of the signals to send
-    mixin field!(string, "dstEntity");
+    @field string dstEntity;
 
     /** This is some more field documentation */
     /** <--
@@ -23,57 +23,51 @@ class TestSendingAspect : Data {
                    --> */
     /** domain of the space hosting destined entity
     at the other side of the junction */
-    mixin field!(string, "dstSpace");
+    @field string dstSpace;
 
     /* creates an array "foo" of string[] type
     however is is not required for this certain scenario */
     /// for sure you should document the array too
-    mixin field!(string[], "foo");
+    @field string[] foo;
 
     /** here sender nots if
     the unicast was confirmed */
-    mixin field!(bool, "unicast");
+    @field bool unicast;
 
     /** ... */
-    mixin field!(bool, "anycast");
+    @field bool anycast;
 
     /** ... */
-    mixin field!(bool, "multicast");
+    @field bool multicast;
 }
 
 // receipting entity has no configuration
 
 /// aspect of a receipting entity
-class TestReceiptingAspect : Data {
-    mixin data;
-
+class TestReceiptingAspect : Data { mixin _data;
     /** used by receipting entity
     to store the receipted unicast */
-    mixin field!(Unicast, "unicast");
+    @field Unicast unicast;
 
     /** ... */
-    mixin field!(Anycast, "anycast");
+    @field Anycast anycast;
     
     /** ... */
-    mixin field!(Multicast, "multicast");
+    @field Multicast multicast;
 }
 
 /** type of the unicast signal to use
 derrives from a certain signal type */
 class TestUnicast : Unicast {
     // still required since a signal is data
-    mixin data;
+    mixin _data;
 }
 
 /** ... */
-class TestAnycast : Anycast {
-    mixin data;
-}
+class TestAnycast : Anycast { mixin _data; }
 
 /** ... */
-class TestMulticast : Multicast {
-    mixin data;
-}
+class TestMulticast : Multicast { mixin _data; }
 
 /** tick defining the change of setting TestSendingAspect.unicast = true
 and what needs to happen for this change aplly */

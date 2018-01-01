@@ -7,14 +7,14 @@
             "label": "build",
             "type": "shell",
             "command": "dmd",
-            "args": [
-                "-debug",
-                "-run",
-                "make.d",
-                "build"
-            ],
+            "windows": {
+                "args": ["-m64", "-debug", "-run", "make.d", "build"]
+            },
+            "linux": {
+                "args": ["-fPIC", "-debug", "-run", "make.d", "build"]
+            },
             "group": "build",
-            "problemMatcher": {
+            "problemMatcher": [{
                 "owner": "d",
                 "fileLocation": [
                     "relative",
@@ -28,18 +28,18 @@
                     "severity": 4,
                     "message": 5
                 }
-            }
+            }]
         },
         {
             "label": "rebuild",
             "type": "shell",
             "command": "dmd",
-            "args": [
-                "-debug",
-                "-run",
-                "make.d",
-                "rebuild"
-            ],
+            "windows": {
+                "args": ["-m64", "-debug", "-run", "make.d", "rebuild"]
+            },
+            "linux": {
+                "args": ["-fPIC", "-debug", "-run", "make.d", "rebuild"]
+            },
             "group": "build",
             "problemMatcher": {
                 "owner": "d",
@@ -61,12 +61,12 @@
             "label": "clean",
             "type": "shell",
             "command": "dmd",
-            "args": [
-                "-debug",
-                "-run",
-                "make.d",
-                "clean"
-            ],
+            "windows": {
+                "args": ["-m64", "-debug", "-run", "make.d", "rebuild"]
+            },
+            "linux": {
+                "args": ["-fPIC", "-debug", "-run", "make.d", "rebuild"]
+            },
             "group": "build",
             "problemMatcher": {
                 "owner": "d",
@@ -88,10 +88,41 @@
             "label": "build tmp/test",
             "type": "shell",
             "command": "dmd",
+            "windows": {
+                "args": ["-m64", "-debug", "-run", "make.d", "rebuild"]
+            },
+            "linux": {
+                "args": ["-fPIC", "-debug", "-run", "make.d", "rebuild"]
+            },
+            "group": "build",
+            "problemMatcher": {
+                "owner": "d",
+                "fileLocation": [
+                    "relative",
+                    "${workspaceRoot}"
+                ],
+                "pattern": {
+                    "regexp": "^(.*)\\((\\d+),(\\d+)\\):\\s+(Warning|Error):\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "column": 3,
+                    "severity": 4,
+                    "message": 5
+                }
+            }
+        },
+        {
+            "label": "build debug of buildsystem (Posix)",
+            "type": "shell",
+            "command": "dmd",
             "args": [
-                "-oftmp/test",
-                "-debug","-g","-vcolumns","-w",
-                "tmp/test.d"
+                "-of${workspaceRoot}/make",
+                "-debug",
+                "-g",
+                "-fPIC",
+                "-vcolumns",
+                "-w",
+                "${workspaceRoot}/make.d"
             ],
             "group": "build",
             "problemMatcher": {
@@ -111,15 +142,15 @@
             }
         },
         {
-            "label": "build debug of buildsystem",
+            "label": "build debug of buildsystem (Windows)",
             "type": "shell",
-            "command": "/usr/bin/dmd",
+            "command": "dmd",
             "args": [
-                "-of${workspaceRoot}/make",
+                "-of${workspaceRoot}/make.exe",
                 "-debug",
                 "-g",
-                "-fPIC",
                 "-vcolumns",
+                "-m64",
                 "-w",
                 "${workspaceRoot}/make.d"
             ],
@@ -163,6 +194,17 @@
             "problemMatcher": [],
             "options": {
                 "cwd": "${workspaceRoot}/util/ssl"
+            }
+        },
+        {
+            "label": "build nanomsg for WINDOWS ONLY",
+            "type": "shell",
+            "command": "${workspaceRoot}/src/lib/foreign/nanomsg.bat",
+            "args": [ ],
+            "group": "build",
+            "problemMatcher": [],
+            "options": {
+                "cwd": "${workspaceRoot}/src/lib/foreign"
             }
         }
     ]

@@ -75,9 +75,14 @@ private ubyte[] sign(ref ubyte[] data, RSA* key, string hash) {
     }
 }
 
+private struct SigData {
+    int hash;
+    ubyte[] data;
+}
+
 private ubyte[] sign(string title, int hash, string hashFunc)(ref ubyte[] data, RSA* key) {
     import deimos.openssl.err : ERR_error_string, ERR_get_error;
-    import flow.core.data : bin;
+    import msgpack : pack;
     import std.conv : to;
 
     auto bs = RSA_size(key);
@@ -85,33 +90,33 @@ private ubyte[] sign(string title, int hash, string hashFunc)(ref ubyte[] data, 
     auto ds = hdata.length.to!uint;
     uint ss;
 
-    auto buf = new ubyte[bs];
-    if(RSA_sign(hash, hdata.ptr, ds, buf.ptr, &ss, key) != 1 || ss < 1)
+    SigData d;
+    d.hash = hash;
+    d.data = new ubyte[bs];
+    if(RSA_sign(d.hash, hdata.ptr, ds, d.data.ptr, &ss, key) != 1 || ss < 1)
         throw new CryptoException("rsa signing error ["~title~"]: "~ERR_error_string(ERR_get_error(), null).to!string);
     
-    buf.length = ss;
-    return hash.bin~buf;
+    d.data.length = ss;
+    return d.pack;
 }
 
-private bool verify(ref ubyte[] data, ref ubyte[] s, RSA* key) {
-    import flow.core.data : unbin;
-    auto hash = s[0..int.sizeof].unbin!int;
-    auto sig = s[int.sizeof..$];
+private bool verify(ref ubyte[] data, ubyte[] s, RSA* key) {
+    import msgpack : unpack;
+    auto d = s.unpack!SigData;
 
-    switch(hash) {
+    switch(d.hash) {
         case NID_hmacWithMD5:
-            return data.verify!(NID_hmacWithMD5, "hashMd5")(sig, key);
+            return data.verify!(NID_hmacWithMD5, "hashMd5")(d.data, key);
         case NID_hmacWithSHA1:
-            return data.verify!(NID_hmacWithSHA1, "hashSha1")(sig, key);
+            return data.verify!(NID_hmacWithSHA1, "hashSha1")(d.data, key);
         case NID_hmacWithSHA256:
-            return data.verify!(NID_hmacWithSHA256, "hashSha256")(sig, key);
+            return data.verify!(NID_hmacWithSHA256, "hashSha256")(d.data, key);
         default: return false;
     }
 }
 
 private bool verify(int hash, string hashFunc)(ref ubyte[] data, ref ubyte[] sig, RSA* key) {
     import deimos.openssl.err : ERR_error_string, ERR_get_error;
-    import flow.core.data : unbin;
     import std.conv : to;
 
     auto hdata = mixin(hashFunc)(data);
@@ -190,25 +195,14 @@ private X509* load(T)(string crt) if(is(T==X509)) {
     return null;
 }
 
-private struct GenCipher {
-    ubyte[] key, iv, data;
-}
-
-private GenCipher loadCipher(ubyte[] data) {
-    import flow.core.data.bin : unpack;
-
-    auto key = data.unpack;
-    auto iv = data.unpack;
-
-    GenCipher gen;
-    gen.key = key;
-    gen.iv = iv;
-    return gen;
+private struct CipherKeyData {
+    ubyte[] key;
+    ubyte[] iv;
 }
 
 /** cipher and hash decides what generator
 will run for creating it it */
-private GenCipher genCipher(string cipher, string hash) {
+private CipherKeyData genCipher(string cipher, string hash) {
     switch(cipher~hash) {
         case SSL_TXT_AES128~SSL_TXT_MD5:
             return genCipher!(SSL_TXT_AES128~"+"~SSL_TXT_MD5, "EVP_aes_128_cbc", "EVP_md5", 16)();
@@ -227,9 +221,8 @@ private GenCipher genCipher(string cipher, string hash) {
 }
 
 /// openssl cipher generator
-private GenCipher genCipher(string title, string cipherFunc, string hashFunc, size_t length)() {
+private CipherKeyData genCipher(string title, string cipherFunc, string hashFunc, size_t length)() {
     import deimos.openssl.rand : RAND_bytes;
-    import flow.core.data.bin : pack;
 
     immutable ks = length;
     immutable rounds = 3;
@@ -244,18 +237,14 @@ private GenCipher genCipher(string title, string cipherFunc, string hashFunc, si
     if(ret != ks)
         new CryptoException("couldn't generate "~title~" cipher");
 
-    // they are packed together for communicating cipher
-    auto data = key.pack~iv.pack;
-
-    GenCipher ciph;
+    CipherKeyData ciph;
     ciph.key = key;
     ciph.iv = iv;
-    ciph.data = data;
 
     return ciph;
 }
 
-private ubyte[] encrypt(ref ubyte[] data, string cipher, GenCipher ciph) {
+private ubyte[] encrypt(ref ubyte[] data, string cipher, CipherKeyData ciph) {
     switch(cipher) {
         case SSL_TXT_AES128:
             return data.encrypt!(
@@ -270,7 +259,7 @@ private ubyte[] encrypt(ref ubyte[] data, string cipher, GenCipher ciph) {
 }
 
 /// openssl cipher context generator
-private ubyte[] encrypt(string title, string cipherFunc)(ref ubyte[] data, GenCipher ciph) {
+private ubyte[] encrypt(string title, string cipherFunc)(ref ubyte[] data, CipherKeyData ciph) {
     import deimos.openssl.aes;
     import deimos.openssl.err : ERR_error_string, ERR_get_error;
     import std.conv : to;
@@ -301,7 +290,7 @@ private ubyte[] encrypt(string title, string cipherFunc)(ref ubyte[] data, GenCi
     return buf;
 }
 
-private ubyte[] decrypt(ref ubyte[] crypt, string cipher, GenCipher ciph) {
+private ubyte[] decrypt(ref ubyte[] crypt, string cipher, CipherKeyData ciph) {
     switch(cipher) {
         case SSL_TXT_AES128:
             return crypt.decrypt!(
@@ -316,7 +305,7 @@ private ubyte[] decrypt(ref ubyte[] crypt, string cipher, GenCipher ciph) {
 }
 
 /// openssl cipher context generator
-private ubyte[] decrypt(string title, string cipherFunc)(ref ubyte[] crypt, GenCipher ciph) {
+private ubyte[] decrypt(string title, string cipherFunc)(ref ubyte[] crypt, CipherKeyData ciph) {
     import deimos.openssl.aes;
     import deimos.openssl.err : ERR_error_string, ERR_get_error;
     import std.conv : to;
@@ -361,33 +350,26 @@ private class Cipher {
     private string cipher, hash;
 
     /// generated cipher
-    private GenCipher gen;
-
-    // lazy loading
-    private void ensureGen() {
-        if(this.gen.data is null)
-            this.gen = genCipher(cipher, hash);
-    }
-
-    /// merged cipher data
-    @property ubyte[] data() {
-        synchronized(this.lock.writer) {
-            this.ensureGen();
-            return this.gen.data;
-        }
-    }
+    private CipherKeyData data;
 
     this(string cipher, string hash) {
         this.lock = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_WRITERS);
-
+        
         this.cipher = cipher;
         this.hash = hash;
+
+        this.data = genCipher(cipher, hash);
     }
 
     this(string cipher, string hash, ref ubyte[] data) {
-        this.gen = loadCipher(data);
+        import msgpack : unpack;
 
-        this(cipher, hash);
+        this.lock = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_WRITERS);
+        
+        this.cipher = cipher;
+        this.hash = hash;
+        
+        this.data = data.unpack!CipherKeyData;
     }
 
     void dispose() {
@@ -399,7 +381,7 @@ private class Cipher {
         import std.conv : to;
 
         synchronized(this.lock.reader) try {
-            return data.encrypt(this.cipher, this.gen);
+            return data.encrypt(this.cipher, this.data);
         } catch(Exception exc) {
             Log.msg(LL.Error, "decrypting by cipher failed", exc);
         }
@@ -412,7 +394,7 @@ private class Cipher {
         import std.conv : to;
 
         synchronized(this.lock.reader) try {
-            return crypt.decrypt(this.cipher, this.gen);
+            return crypt.decrypt(this.cipher, this.data);
         } catch(Exception exc) {
             Log.msg(LL.Error, "decrypting by cipher failed", exc);
         }
@@ -443,6 +425,18 @@ private void free(RsaPubCtx ctx) {
     RSA_free(ctx.rsa);
     EVP_PKEY_free(ctx.pub);
     X509_free(ctx.crt);  
+}
+
+private struct CipherData {
+    string cipher;
+    string hash;
+    ubyte[] data;
+    ubyte[] sig;
+}
+
+private struct CryptData {
+    ubyte[] cipher;
+    ubyte[] data;
 }
 
 private class Peer {
@@ -481,30 +475,31 @@ private class Peer {
 
     /// ciphers used to encrypt outgoing packages
     private Cipher outgoing;
-    private ubyte[] outCrypt;
-    private SysTime outValidity;
+    private ubyte[] outData;
+    private long outValidity;
 
     private void createOutgoing() {
-        import flow.core.data.bin : bin, pack;
+        import msgpack : pack;
+        this.ensureCtx();
 
         Cipher ciph = new Cipher(this.crypto.cipher, this.crypto.hash);
         
         // encrypts and signs generated cipher
-        auto data = ciph.data;
-        this.ensureCtx();
-        auto crypt = data.encryptRsa(this.ctx.rsa);
-        auto sig = crypt.sign(this.crypto.ctx.rsa, this.crypto.hash);
-        auto cipherBin = ciph.cipher.bin;
-        auto hashBin = ciph.hash.bin;
-        this.outCrypt = cipherBin.pack~hashBin.pack~sig.pack~crypt.pack;
-        this.outValidity = Clock.currTime + this.validity;
+        CipherData d;
+        d.cipher = ciph.cipher;
+        d.hash = ciph.hash;
+        auto key = ciph.data.pack;
+        d.data = key.encryptRsa(this.ctx.rsa);
+        d.sig = d.data.sign(this.crypto.ctx.rsa, this.crypto.hash);
+        this.outData = d.pack;
+        this.outValidity = Clock.currStdTime + this.validity.total!"hnsecs";
         this.outgoing = ciph;
     }
 
     private @property void ensureOutgoing() {
         import core.memory : GC;
         synchronized(this.lock.writer)  {
-            if(this.outgoing is null || this.outValidity < Clock.currTime) {
+            if(this.outgoing is null || this.outValidity < Clock.currStdTime) {
                 if(this.outgoing !is null)
                     this.outgoing.dispose(); GC.free(&this.outgoing);
                 this.createOutgoing();
@@ -514,7 +509,7 @@ private class Peer {
 
     /// ciphers used to decrypt incoming packages
     private Cipher[ulong] incoming;
-    private SysTime[ulong] inValidity;
+    private long[ulong] inValidity;
 
     this(Crypto crypto, string crt, Duration outValidity, bool check = true) {
         this.lock = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_WRITERS);
@@ -564,14 +559,16 @@ private class Peer {
     }
 
     ubyte[] encrypt(ref ubyte[] data) {
-        import flow.core.data.bin : pack;
+        import msgpack : pack;
         // binary rule: crypted cipher is packed, rest is data
         this.ensureCtx();
         this.ensureOutgoing();
         
         synchronized(this.lock.reader) {
-            auto crypt = this.outgoing.encrypt(data);
-            return this.outCrypt.pack~crypt;
+            CryptData d;
+            d.cipher = this.outData;
+            d.data = this.outgoing.encrypt(data);
+            return d.pack;
         }
     }
 
@@ -579,26 +576,24 @@ private class Peer {
     private void cleanInCiphers() {
         import core.memory : GC;
         foreach(h, c; this.incoming)
-            if(this.inValidity[h] < Clock.currTime) {
+            if(this.inValidity[h] < Clock.currStdTime) {
                 this.incoming.remove(h);
                 c.dispose(); GC.free(&c);
             }
     }
 
     /// unpacks received cipher data and creates its stuff if needed
-    private Cipher addInCipher(ref ubyte[] cc) {
-        import flow.core.data.bin : unpack, unbin;
+    private Cipher addInCipher(ubyte[] cdata) {
+        import flow.core.data : unbin;
+        import msgpack : unpack;
         import std.conv : to;
 
-        if(cc !is null) {
-            auto cipher = cc.unpack.unbin!string;
-            auto hash = cc.unpack.unbin!string;
-            // get signature out of crypted cipher
-            auto sig = cc.unpack;
+        if(cdata !is null) {
+            auto d = cdata.unpack!CipherData;
 
             /* generate cipher id out of crypted data
             due to rsa encryption of randoms this should be representative */
-            auto id = sig[0..ulong.sizeof].unbin!long;
+            auto id = d.sig[0..ulong.sizeof].as!(ubyte*).as!long;
 
             synchronized(this.lock.writer) {        
                 // if cipher id is known stay in reader mode and return cipher
@@ -609,14 +604,11 @@ private class Peer {
                     // clean what is expired (requires writer mode)
                     this.cleanInCiphers();
 
-                    // get crypted data out of crypted cipher
-                    auto crypt = cc.unpack;
-
-                    auto sigOk = sig !is null && crypt.verify(sig, this.ctx.rsa);
-                    auto data = crypt.decryptRsa(this.crypto.ctx.rsa);
+                    auto sigOk = d.sig !is null && d.data.verify(d.sig, this.ctx.rsa);
+                    auto data = d.data.decryptRsa(this.crypto.ctx.rsa);
                     if(data !is null) { // add it if it could get decrypted
-                        auto ciph = new Cipher(cipher, hash, data);
-                        this.inValidity[id] = Clock.currTime + this.validity;
+                        auto ciph = new Cipher(d.cipher, d.hash, data);
+                        this.inValidity[id] = Clock.currStdTime + this.validity.total!"hnsecs";
                         
                         this.incoming[id] = ciph;
 
@@ -629,18 +621,19 @@ private class Peer {
 
     /// decrypts encrypted data returning its plain bytes unless there is a key
     ubyte[] decrypt(ubyte[] crypt) { // parameter crypt will get modified (never ref)
-        import flow.core.data.bin : unpack;
         import flow.core.util.log : Log, LL;
+        import msgpack : unpack;
+
         try {
             // binary rule: crypted cipher is packed, rest is data
-            auto cc = crypt.unpack;
+            auto d = crypt.unpack!CryptData;
             this.ensureCtx();
-            auto ciph = this.addInCipher(cc);
+            auto ciph = this.addInCipher(d.cipher);
 
             synchronized(this.lock.reader) {                
                 if(ciph !is null)
-                    return ciph.decrypt(crypt);
-                else return crypt; // if there is no in cipher, it is assumed pkg is not encrypted;
+                    return ciph.decrypt(d.data);
+                else return d.data; // if there is no in cipher, it is assumed pkg is not encrypted;
             }
         } catch(Exception exc) {
             Log.msg(LL.Error, "decrypting by cipher failed", exc);

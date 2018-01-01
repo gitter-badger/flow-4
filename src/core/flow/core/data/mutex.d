@@ -19,16 +19,16 @@ version( Posix )
     private import core.sys.posix.pthread;
 }
 
-interface ILockChildren {
-    void readerLockChilds();
-    void writerLockChilds();
-    void readerUnlockChilds();
-    void writerUnlockChilds();
+struct RecursiveLocker {
+    void delegate() readerLock;
+    void delegate() writerLock;
+    void delegate() readerUnlock;
+    void delegate() writerUnlock;
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////
-// ReadWriteMutex
+// DataMutex
 //
 // Reader reader();
 // Writer writer();
@@ -48,7 +48,7 @@ interface ILockChildren {
  * an issue however, because it is uncommon to call deeply into unknown code
  * while holding a lock that simply protects data.
  */
-class ReadWriteMutex
+class DataMutex
 {
     /**
      * Defines the policy used by this mutex.  Currently, two policies are
@@ -86,7 +86,7 @@ class ReadWriteMutex
      * Throws:
      *  SyncError on error.
      */
-    this( Policy policy = Policy.PREFER_WRITERS, ILockChildren cl = null )
+    this(RecursiveLocker rl, Policy policy = Policy.PREFER_WRITERS)
     {
         m_commonMutex = new Mutex;
         if( !m_commonMutex )
@@ -101,8 +101,8 @@ class ReadWriteMutex
             throw new SyncError( "Unable to initialize mutex" );
 
         m_policy = policy;
-        m_reader = new Reader(cl);
-        m_writer = new Writer(cl);
+        m_reader = new Reader(rl);
+        m_writer = new Writer(rl);
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -166,8 +166,9 @@ class ReadWriteMutex
         /**
          * Initializes a read/write mutex reader proxy object.
          */
-        this(ILockChildren cl)
+        this(RecursiveLocker rl)
         {
+            //m_rl = rl;
             m_proxy.link = this;
             this.__monitor = &m_proxy;
         }
@@ -187,8 +188,7 @@ class ReadWriteMutex
                     m_readerQueue.wait();
 				addActiveReader();
 
-                if(m_cl !is null)
-                    m_cl.readerLockChilds();
+                //m_rl.readerLock();
             }
         }
 
@@ -200,8 +200,7 @@ class ReadWriteMutex
         {
             synchronized( m_commonMutex )
             {
-                if(m_cl !is null)
-                    m_cl.readerUnlockChilds();
+                //m_rl.readerUnlock();
 
                 if( removeActiveReader() < 1 )
                 {
@@ -221,19 +220,12 @@ class ReadWriteMutex
          */
         bool tryLock()
         {
-            if(m_cl !is null) assert(false, "child locking is not supporting tryLock");
-            synchronized( m_commonMutex )
-            {
-                if( shouldQueueReader )
-                    return false;
-                addActiveReader();
-                return true;
-            }
+            assert(false, "child locking is not supporting tryLock");
         }
 
 
     private:
-        ILockChildren m_cl;
+        //RecursiveLocker m_rl;
 
         @property bool shouldQueueReader()
         {
@@ -277,8 +269,9 @@ class ReadWriteMutex
         /**
          * Initializes a read/write mutex writer proxy object.
          */
-        this(ILockChildren cl)
+        this(RecursiveLocker rl)
         {
+            //m_rl = rl;
             m_proxy.link = this;
             this.__monitor = &m_proxy;
         }
@@ -298,8 +291,7 @@ class ReadWriteMutex
                     m_writerQueue.wait();
                 ++m_numActiveWriters;
 
-                if(m_cl !is null)
-                    m_cl.readerLockChilds();
+                //m_rl.readerLock();
             }
         }
 
@@ -311,8 +303,7 @@ class ReadWriteMutex
         {
             synchronized( m_commonMutex )
             {
-                if(m_cl !is null)
-                    m_cl.readerUnlockChilds();
+                //m_rl.readerUnlock();
 
                 if( --m_numActiveWriters < 1 )
                 {
@@ -346,19 +337,12 @@ class ReadWriteMutex
          */
         bool tryLock()
         {
-            if(m_cl !is null) assert(false, "child locking is not supporting tryLock");
-            synchronized( m_commonMutex )
-            {
-                if( shouldQueueWriter )
-                    return false;
-                ++m_numActiveWriters;
-                return true;
-            }
+            assert(false, "child locking is not supporting tryLock");
         }
 
 
     private:
-        ILockChildren m_cl;
+        //RecursiveLocker m_rl;
 
         @property bool shouldQueueWriter()
         {
@@ -410,146 +394,4 @@ private:
 		
 		return left;
 	}
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-// Unit Tests
-////////////////////////////////////////////////////////////////////////////////
-
-
-unittest
-{
-    import core.atomic, core.thread, core.sync.semaphore;
-
-    static void runTest(ReadWriteMutex.Policy policy)
-    {
-        scope mutex = new ReadWriteMutex(policy);
-        scope rdSemA = new Semaphore, rdSemB = new Semaphore,
-              wrSemA = new Semaphore, wrSemB = new Semaphore;
-        shared size_t numReaders, numWriters;
-
-        void readerFn()
-        {
-            synchronized (mutex.reader)
-            {
-                atomicOp!"+="(numReaders, 1);
-                rdSemA.notify();
-                rdSemB.wait();
-                atomicOp!"-="(numReaders, 1);
-            }
-        }
-
-        void writerFn()
-        {
-            synchronized (mutex.writer)
-            {
-                atomicOp!"+="(numWriters, 1);
-                wrSemA.notify();
-                wrSemB.wait();
-                atomicOp!"-="(numWriters, 1);
-            }
-        }
-
-        void waitQueued(size_t queuedReaders, size_t queuedWriters)
-        {
-            for (;;)
-            {
-                synchronized (mutex.m_commonMutex)
-                {
-                    if (mutex.m_numQueuedReaders == queuedReaders &&
-                        mutex.m_numQueuedWriters == queuedWriters)
-                        break;
-                }
-                //Thread.yield();
-            }
-        }
-
-        scope group = new ThreadGroup;
-
-        // 2 simultaneous readers
-        group.create(&readerFn); group.create(&readerFn);
-        rdSemA.wait(); rdSemA.wait();
-        assert(numReaders == 2);
-        rdSemB.notify(); rdSemB.notify();
-        group.joinAll();
-        assert(numReaders == 0);
-        foreach (t; group) group.remove(t);
-
-        // 1 writer at a time
-        group.create(&writerFn); group.create(&writerFn);
-        wrSemA.wait();
-        assert(!wrSemA.tryWait());
-        assert(numWriters == 1);
-        wrSemB.notify();
-        wrSemA.wait();
-        assert(numWriters == 1);
-        wrSemB.notify();
-        group.joinAll();
-        assert(numWriters == 0);
-        foreach (t; group) group.remove(t);
-
-        // reader and writer are mutually exclusive
-        group.create(&readerFn);
-        rdSemA.wait();
-        group.create(&writerFn);
-        waitQueued(0, 1);
-        assert(!wrSemA.tryWait());
-        assert(numReaders == 1 && numWriters == 0);
-        rdSemB.notify();
-        wrSemA.wait();
-        assert(numReaders == 0 && numWriters == 1);
-        wrSemB.notify();
-        group.joinAll();
-        assert(numReaders == 0 && numWriters == 0);
-        foreach (t; group) group.remove(t);
-
-        // writer and reader are mutually exclusive
-        group.create(&writerFn);
-        wrSemA.wait();
-        group.create(&readerFn);
-        waitQueued(1, 0);
-        assert(!rdSemA.tryWait());
-        assert(numReaders == 0 && numWriters == 1);
-        wrSemB.notify();
-        rdSemA.wait();
-        assert(numReaders == 1 && numWriters == 0);
-        rdSemB.notify();
-        group.joinAll();
-        assert(numReaders == 0 && numWriters == 0);
-        foreach (t; group) group.remove(t);
-
-        // policy determines whether queued reader or writers progress first
-        group.create(&writerFn);
-        wrSemA.wait();
-        group.create(&readerFn);
-        group.create(&writerFn);
-        waitQueued(1, 1);
-        assert(numReaders == 0 && numWriters == 1);
-        wrSemB.notify();
-
-        if (policy == ReadWriteMutex.Policy.PREFER_READERS)
-        {
-            rdSemA.wait();
-            assert(numReaders == 1 && numWriters == 0);
-            rdSemB.notify();
-            wrSemA.wait();
-            assert(numReaders == 0 && numWriters == 1);
-            wrSemB.notify();
-        }
-        else if (policy == ReadWriteMutex.Policy.PREFER_WRITERS)
-        {
-            wrSemA.wait();
-            assert(numReaders == 0 && numWriters == 1);
-            wrSemB.notify();
-            rdSemA.wait();
-            assert(numReaders == 1 && numWriters == 0);
-            rdSemB.notify();
-        }
-        group.joinAll();
-        assert(numReaders == 0 && numWriters == 0);
-        foreach (t; group) group.remove(t);
-    }
-    runTest(ReadWriteMutex.Policy.PREFER_READERS);
-    runTest(ReadWriteMutex.Policy.PREFER_WRITERS);
 }

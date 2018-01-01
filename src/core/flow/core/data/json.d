@@ -9,7 +9,7 @@ private import std.variant;
 
 private JSONValue jsonValue(Variant t, PropertyInfo pi) {
     import flow.core.data.engine : Data, TypeDesc;
-    import std.datetime : SysTime, DateTime, Date, Duration;
+    import std.datetime : DateTime, Date, Duration;
     import std.uuid : UUID;
 
     if(pi.array) {
@@ -43,8 +43,6 @@ private JSONValue jsonValue(Variant t, PropertyInfo pi) {
             return t.get!(dchar[]).jsonValue;
         else if(pi.desc == TypeDesc.UUID)
             return t.get!(UUID[]).jsonValue;
-        else if(pi.desc == TypeDesc.SysTime)
-            return t.get!(SysTime[]).jsonValue;
         else if(pi.desc == TypeDesc.DateTime)
             return t.get!(DateTime[]).jsonValue;
         else if(pi.desc == TypeDesc.Date)
@@ -87,8 +85,6 @@ private JSONValue jsonValue(Variant t, PropertyInfo pi) {
             return t.get!(dchar).jsonValue;
         else if(pi.desc == TypeDesc.UUID)
             return t.get!(UUID).jsonValue;
-        else if(pi.desc == TypeDesc.SysTime)
-            return t.get!(SysTime).jsonValue;
         else if(pi.desc == TypeDesc.DateTime)
             return t.get!(DateTime).jsonValue;
         else if(pi.desc == TypeDesc.Date)
@@ -109,7 +105,6 @@ if(
     (
         is(ElementType!T : Data) ||
         is(ElementType!T == std.uuid.UUID) ||
-        is(ElementType!T == std.datetime.SysTime) ||
         is(ElementType!T == std.datetime.DateTime) ||
         is(ElementType!T == std.datetime.Date) ||
         is(ElementType!T == std.datetime.Duration)
@@ -133,7 +128,6 @@ if(
     !is(T == string) &&
     !is(ElementType!T : Data) &&
     !is(ElementType!T == std.uuid.UUID) &&
-    !is(ElementType!T == std.datetime.SysTime) &&
     !is(ElementType!T == std.datetime.DateTime) &&
     !is(ElementType!T == std.datetime.Date) &&
     !is(ElementType!T == std.datetime.Duration) &&
@@ -172,7 +166,6 @@ if(
     !is(T == float) &&
     !is(T == double) &&
     !is(T == std.uuid.UUID) &&
-    !is(T == std.datetime.SysTime) &&
     !is(T == std.datetime.DateTime) &&
     !is(T == std.datetime.Date) &&
     !is(T == std.datetime.Duration)
@@ -202,7 +195,6 @@ if(is(T == std.uuid.UUID)) {
 
 private JSONValue jsonValue(T)(T val)
 if(
-    is(T == std.datetime.SysTime) ||
     is(T == std.datetime.DateTime) ||
     is(T == std.datetime.Date)
 ) {
@@ -278,7 +270,7 @@ Data createDataFromJson(string str, JsonSerializer serializer = JsonSerializer.S
 private Data createData(JSONValue j) {
     import flow.core.data.engine : createData, Data, PropertyInfo;
     import flow.core.util.templates : as;
-    import std.datetime : SysTime, DateTime, Date, Duration;
+    import std.datetime : DateTime, Date, Duration;
     import std.uuid : UUID;
     import std.variant : Variant;
     
@@ -309,7 +301,6 @@ private Data createData(JSONValue j) {
             if(!val.hasValue) val = e.get!wchar(d, pi);
             if(!val.hasValue) val = e.get!dchar(d, pi);
             if(!val.hasValue) val = e.get!UUID(d, pi);
-            if(!val.hasValue) val = e.get!SysTime(d, pi);
             if(!val.hasValue) val = e.get!DateTime(d, pi);
             if(!val.hasValue) val = e.get!Date(d, pi);
             if(!val.hasValue) val = e.get!Duration(d, pi);
@@ -332,7 +323,7 @@ if(
 ) {
     import flow.core.util.templates : as;
     import std.base64 : Base64;
-    import std.datetime : SysTime, DateTime, Date, Duration, hnsecs;
+    import std.datetime : DateTime, Date, Duration, hnsecs;
     import std.json : JSON_TYPE;
     import std.uuid : UUID, parseUUID;
     import std.traits : isScalarType;
@@ -356,7 +347,7 @@ if(
                         return Variant(arr);
                     } else throw new InvalidJsonException("\""~d.dataType~"\" property \""~pi.name~"\" type mismatching");
                 }
-                else static if(is(T == SysTime) || is(T == DateTime) || is(T == Date))
+                else static if(is(T == DateTime) || is(T == Date))
                     return Variant(T.fromISOString(j.str));
                 else static if(is(T == Duration))
                     return Variant(j.integer.hnsecs);
@@ -454,8 +445,8 @@ unittest { test.header("data.json: json serialization of data and member");
         "\"uinteger\":5,"~
         "\"uintegerA\":[3,4],"~
         "\"uuid\":\"1bf8eac7-64ee-4cde-aa9e-8877ac2d511d\"}";
-    debug(data) writeln(templ);
-    debug(data) writeln(dStr);
+    debug(data) {import std.stdio : writeln; writeln(templ);}
+    debug(data) {import std.stdio : writeln; writeln(dStr);}
     assert(dStr == templ, "could not serialize data to json");
 
     auto d2 = parseJSON(dStr).createData.as!InheritedTestData;

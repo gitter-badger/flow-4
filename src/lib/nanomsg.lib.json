@@ -4,5 +4,5 @@
     "cflags": [],
     "lflags": [],
     "posixlibs": ["libnanomsg.so"],
-    "winlibs": ["nanomsg.lib"]
+    "winlibs": ["ws2_32.lib", "mswsock.lib", "advapi32.lib", "nanomsg\\nanomsg.lib"]
 }

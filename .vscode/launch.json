@@ -3,12 +3,21 @@
 
     "configurations": [
         {
-            "name": "test/core",
+            "name": "test/core (Posix)",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceRoot}/test/core",
             "args": [ ],
             "environment": [{"name": "LD_LIBRARY_PATH", "value": "${workspaceRoot}/lib"}],
+            "cwd": "${workspaceRoot}"
+        },
+        {
+            "name": "test/core (Windows)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}\\test\\core.exe",
+            "args": [ ],
+            "environment": [ ],
             "cwd": "${workspaceRoot}"
         },
         {
@@ -48,7 +57,7 @@
             "cwd": "${workspaceRoot}"
         },
         {
-            "name": "make",
+            "name": "make (Posix)",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceRoot}/make",
@@ -56,6 +65,15 @@
             "environment": [{"name": "LD_LIBRARY_PATH", "value": "${workspaceRoot}/lib"}],
             "cwd": "${workspaceRoot}"
         },
+        {
+            "name": "make (Windows)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}\\make.exe",
+            "args": [ ],
+            "environment": [ ],
+            "cwd": "${workspaceRoot}"
+        }
         /*{
             "name": "test/XXX",
             "type": "cppdbg",

@@ -622,11 +622,11 @@ DuRfSEERdBHjYgvyYN3Q5tlWea/uvQ==
     spc2.tick();
     spc1.tick();
 
-    Thread.sleep(100.msecs);
+    Thread.sleep(200.msecs);
 
     spc2.freeze();
     spc1.freeze();
-
+    
     auto nsm1 = spc1.snap();
     auto nsm2 = spc2.snap();
 
@@ -847,7 +847,7 @@ DuRfSEERdBHjYgvyYN3Q5tlWea/uvQ==
     spc2.tick();
     spc1.tick();
 
-    Thread.sleep(100.msecs);
+    Thread.sleep(300.msecs);
 
     spc2.freeze();
     spc1.freeze();

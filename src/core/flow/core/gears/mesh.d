@@ -21,55 +21,36 @@ enum MsgCode : ubyte {
     Signal = ubyte.max
 }
 
-struct Msg {
-    shared static size_t lastId;
+struct InfoData {
+    string space;
+    string addr;
+    ubyte[] info;
+    ubyte[] auth;
+}
 
-    static size_t getNewId() {
+struct MsgData {
+    import msgpack : nonPacked;
+    @nonPacked shared static ulong lastId;
+
+    @nonPacked static ulong getNewId() {
         import core.atomic : atomicOp;
         return atomicOp!"+="(lastId, 1);
     }
 
-    bool valid;
-    Throwable error;
+    @nonPacked Throwable error;
 
     ubyte[IDLENGTH] dst;
     ubyte[IDLENGTH] src;
     MsgCode code;
-    size_t id;
+    ulong id;
     ubyte[] data;
 
-    this(ubyte[] t, ubyte[] s, MsgCode c, size_t i = getNewId, ubyte[] d = null) {
+    this(ubyte[] t, ubyte[] s, MsgCode c, ulong i = getNewId, ubyte[] d = null) {
         dst = t;
         src = s;
         code = c;
         id = i;
         data = d;
-
-        valid = true;
-    }
-
-    this(ubyte[] pkg) {
-        try {
-            import std.range : popFront, popFrontN;
-            dst = pkg[0..IDLENGTH]; pkg.popFrontN(IDLENGTH);
-            src = pkg[0..IDLENGTH]; pkg.popFrontN(IDLENGTH);
-            code = pkg[0].as!MsgCode; pkg.popFront;
-            id = pkg[0..size_t.sizeof].unbin!size_t; pkg.popFrontN(size_t.sizeof);
-            data = pkg;
-            valid = true;
-        } catch(Throwable thr) {
-            this.error = thr;
-        }
-    }
-
-    ubyte[] bin() {
-        ubyte[] pkg;
-        pkg ~= dst;
-        pkg ~= src;
-        pkg ~= [this.code];
-        pkg ~= id.bin;
-        pkg ~= data;
-        return pkg;
     }
 }
 
@@ -82,8 +63,8 @@ private class MeshChannel : Channel {
     private bool passive;
     
     Mutex cfrmLock;
-    bool[size_t] awaitCfrm;
-    bool[size_t] cfrms;
+    bool[ulong] awaitCfrm;
+    bool[ulong] cfrms;
 
     override @property MeshJunction own() {
         return super.own.as!MeshJunction;
@@ -99,7 +80,7 @@ private class MeshChannel : Channel {
         import std.digest.md : md5Of;
 
         this.cfrmLock = new Mutex;
-        this.id[0..IDLENGTH] = dst.bin.md5Of.dup;
+        this.id[0..IDLENGTH] = dst.md5Of.dup;
         this._auth = auth;
         this.info = info;
 
@@ -114,18 +95,18 @@ private class MeshChannel : Channel {
     override protected bool reqVerify() {
         import std.conv : to;
         
-        auto msgId = Msg.getNewId;
+        auto msgId = MsgData.getNewId;
         debug Log.msg(LL.Debug, this.logPrefix~"request verification("~msgId.to!string~")");
-        return this.own.confirmedSend(Msg(this.id, this.own.id,
+        return this.own.confirmedSend(MsgData(this.id, this.own.id,
             MsgCode.Verify, msgId), this);
     }
 
     override protected bool transport(ref ubyte[] pkg) {
         import std.conv : to;
 
-        auto msgId = Msg.getNewId;
+        auto msgId = MsgData.getNewId;
         debug Log.msg(LL.Debug, this.logPrefix~"transport("~msgId.to!string~")");
-        return this.own.confirmedSend(Msg(this.id, this.own.id, 
+        return this.own.confirmedSend(MsgData(this.id, this.own.id, 
             MsgCode.Signal, msgId, pkg), this);
     }
 }
@@ -152,12 +133,12 @@ abstract class MeshConnector {
 
     protected abstract bool connect(string addr);
 
-    protected abstract bool send(Msg msg);
+    protected abstract bool send(MsgData msg);
 
     protected abstract void add(ubyte[IDLENGTH] dst, ubyte[] info);
     protected abstract void remove(ubyte[IDLENGTH] dst);
 
-    protected void proc(Msg msg) {this._junction.proc(msg);}
+    protected void proc(MsgData msg) {this._junction.proc(msg);}
 }
 
 private class MeshJunction : Junction {
@@ -168,8 +149,8 @@ private class MeshJunction : Junction {
     private ubyte[IDLENGTH] id;
 
     private Mutex ackLock;
-    private bool[size_t] awaitAck;
-    private bool[size_t] acks;
+    private bool[ulong] awaitAck;
+    private bool[ulong] acks;
 
     private ReadWriteMutex cLock;
     private MeshChannel[ubyte[IDLENGTH]] channels;
@@ -206,7 +187,7 @@ private class MeshJunction : Junction {
                 this.meta.ackInterval = 1;
 
             // connect to others
-            size_t[] failed;
+            ulong[] failed;
             foreach(i, k; this.meta.known)
                 if(!this.conn.connect(k))
                     failed ~= i;
@@ -235,35 +216,46 @@ private class MeshJunction : Junction {
                 this.meta.known ~= addr;
     }
 
-    private void sendAck(Msg msg) {
-        this.conn.send(Msg(msg.src, this.id,
+    private void sendAck(MsgData msg) {
+        this.conn.send(MsgData(msg.src, this.id,
             MsgCode.Ack,
             msg.id));
     }
 
-    private void sendCfrm(Msg msg, bool accepted, MeshChannel c) {
-        this.ensuredSend(Msg(msg.src, this.id, MsgCode.Cfrm, msg.id,
-            [accepted ? ubyte.max : ubyte.min]));
+    private void sendCfrm(MsgData msg, bool accepted, MeshChannel c) {
+        import std.conv : to;
+        debug {
+            if(accepted)
+                Log.msg(LL.Debug, this.logPrefix~"accepting("~msg.id.to!string~")");
+            else
+                Log.msg(LL.Debug, this.logPrefix~"refusing("~msg.id.to!string~")");
+        }
+        this.ensuredSend(MsgData(msg.src, this.id, MsgCode.Cfrm, msg.id,
+            [accepted ? 1 : 0]));
     }
 
     private void sendPing() {
-        this.conn.send(Msg(this.sysId, this.id, MsgCode.Ping, Msg.getNewId, this.meta.info.as!MeshJunctionInfo.addr.bin));
+        import msgpack : pack;
+        auto addr = this.meta.info.as!MeshJunctionInfo.addr;
+        this.conn.send(MsgData(this.sysId, this.id, MsgCode.Ping, MsgData.getNewId, addr.pack));
     }
 
-    private void sendInfo(ubyte[IDLENGTH] dst, size_t id = Msg.getNewId) {
-        this.ensuredSend(Msg(dst, this.id, MsgCode.Info, id,
-            this.meta.info.space.bin.pack
-            ~this.meta.info.as!MeshJunctionInfo.addr.bin.pack
-            ~this.conn.info.pack
-            ~this.auth));
+    private void sendInfo(ubyte[IDLENGTH] dst, ulong id = MsgData.getNewId) {
+        import msgpack : pack;
+        InfoData d;
+        d.space = this.meta.info.space;
+        d.addr = this.meta.info.as!MeshJunctionInfo.addr;
+        d.info = this.conn.info;
+        d.auth = this.auth;
+        this.ensuredSend(MsgData(dst, this.id, MsgCode.Info, id, d.pack));
     }
 
-    private bool ensuredSend(Msg msg) {
+    private bool ensuredSend(MsgData msg) {
         import core.time : msecs;
         import std.conv : to;
         import std.datetime.systime : Clock;
 
-        auto timeout = this.meta.as!MeshJunctionMeta.ackTimeout;
+        /*auto timeout = this.meta.as!MeshJunctionMeta.ackTimeout;
         if(timeout > 0) {
             synchronized(this.ackLock)
                 this.awaitAck[msg.id] = true;
@@ -284,11 +276,11 @@ private class MeshJunction : Junction {
                     scope(exit) this.acks.remove(msg.id);
                     return this.acks[msg.id];
                 } else return false;
-        } else
+        } else*/
             return this.conn.send(msg);
     }
 
-    private bool confirmedSend(Msg msg, MeshChannel c) {
+    private bool confirmedSend(MsgData msg, MeshChannel c) {
         import core.time : msecs;
         import std.conv : to;
         import std.datetime.systime : Clock;
@@ -320,41 +312,44 @@ private class MeshJunction : Junction {
             return this.ensuredSend(msg);
     }
 
-    private void proc(Msg msg) {
+    private void proc(MsgData msg) {
         import std.conv : to;
-        if(msg.valid) try {
-            switch(msg.code) {
-                case MsgCode.Ack:
-                this.onAck(msg);
-                    break;
-                case MsgCode.Ping:
-                    this.onPing(msg);
-                    break;
-                case MsgCode.Info:
-                    this.onInfo(msg);
-                    break;
-                case MsgCode.SignOff:
-                    this.onSignOff(msg);
-                    break;
-                case MsgCode.Verify:
-                    this.onVerify(msg);
-                    break;
-                case MsgCode.Signal:
-                    this.onSignal(msg);
-                    break;
-                case MsgCode.Cfrm:
-                    this.onCfrm(msg);
-                    break;
-                default:
-                    this.onDefault(msg);
-                    break;
+        // process signal only if its for me
+        if(msg.dst == this.sysId || msg.dst == this.id) {
+            try {
+                switch(msg.code) {
+                    case MsgCode.Ack:
+                    this.onAck(msg);
+                        break;
+                    case MsgCode.Ping:
+                        this.onPing(msg);
+                        break;
+                    case MsgCode.Info:
+                        this.onInfo(msg);
+                        break;
+                    case MsgCode.SignOff:
+                        this.onSignOff(msg);
+                        break;
+                    case MsgCode.Verify:
+                        this.onVerify(msg);
+                        break;
+                    case MsgCode.Signal:
+                        this.onSignal(msg);
+                        break;
+                    case MsgCode.Cfrm:
+                        this.onCfrm(msg);
+                        break;
+                    default:
+                        this.onDefault(msg);
+                        break;
+                }
+            } catch(Throwable thr) {
+                Log.msg(LL.Error, this.logPrefix~"processing message", thr);
             }
-        } catch(Throwable thr) {
-            Log.msg(LL.Error, this.logPrefix~"processing message", thr);
-        } else Log.msg(LL.Error, this.logPrefix~"deserializing msg failed", msg.error);
+        }
     }
 
-    private void onAck(Msg msg) {
+    private void onAck(MsgData msg) {
         import std.conv : to;
 
         debug Log.msg(LL.Debug, this.logPrefix~"ack("~msg.id.to!string~") ");
@@ -362,44 +357,42 @@ private class MeshJunction : Junction {
                 this.acks[msg.id] = true;
     }
 
-    private void onPing(Msg msg) {
+    private void onPing(MsgData msg) {
+        import msgpack : unpack;
         import std.conv : to;
         import std.digest : toHexString;
 
         debug Log.msg(LL.Debug, this.logPrefix~"ping("~msg.id.to!string~") from "~msg.src.toHexString.to!string);
         
-        auto addr = msg.data.unbin!string;
+        auto addr = msg.data.unpack!string;
         this.contact(addr);
         
         synchronized(this.cLock.reader)
             this.sendInfo(msg.src, msg.id);
     }
 
-    private void onInfo(Msg msg) {
+    private void onInfo(MsgData msg) {
+        import msgpack : unpack;
         import std.conv : to;
         import std.digest : toHexString;
         
+        auto src = msg.src;
         this.sendAck(msg); // send an ack
 
         // if there is no channel to this junction, create one
-        auto src = msg.data.unpack.unbin!string;
-
-        auto addr = msg.data.unpack.unbin!string;
-        auto info = msg.data.unpack;
-        this.contact(addr);
-
-        debug Log.msg(LL.Debug, this.logPrefix~"info("~msg.id.to!string~") from "~src~" known as "~msg.src.toHexString.to!string);
-
+        auto d = msg.data.unpack!InfoData;
         synchronized(this.cLock.writer)
             if(msg.src !in this.channels) {
-                auto c = new MeshChannel(src, this, info, msg.data);
+                this.contact(d.addr);
+                debug Log.msg(LL.Debug, this.logPrefix~"info("~msg.id.to!string~") from "~d.space~" known as "~msg.src.toHexString.to!string);
+                auto c = new MeshChannel(d.space, this, d.info, d.auth);
                 this.register(c);
                 this.sendInfo(msg.src, msg.id);
             }
     }
 
     /// if a node signs off deregister its channel
-    private void onSignOff(Msg msg) {
+    private void onSignOff(MsgData msg) {
         import std.conv : to;
         import std.digest : toHexString;
         
@@ -409,7 +402,7 @@ private class MeshJunction : Junction {
                 this.unregister(this.channels[msg.src]);
     }
 
-    private void onVerify(Msg msg) {
+    private void onVerify(MsgData msg) {
         import std.conv : to;
         import std.digest : toHexString;
         
@@ -427,7 +420,7 @@ private class MeshJunction : Junction {
         }
     }
 
-    private void onSignal(Msg msg) {
+    private void onSignal(MsgData msg) {
         import std.conv : to;
         import std.digest : toHexString;
         
@@ -448,12 +441,12 @@ private class MeshJunction : Junction {
         }
     }
 
-    private void onCfrm(Msg msg) {
+    private void onCfrm(MsgData msg) {
         import std.conv : to;
 
         this.sendAck(msg); // send an ack
 
-        bool answer = msg.data[0] == ubyte.max;
+        bool answer = msg.data[0] == 1;
 
         synchronized(this.cLock.reader) {
             debug Log.msg(LL.Debug, this.logPrefix~(answer ? "accepted" : "refused")~"("~msg.id.to!string~") ");
@@ -463,7 +456,7 @@ private class MeshJunction : Junction {
         }
     }
 
-    private void onDefault(Msg msg) {
+    private void onDefault(MsgData msg) {
         Log.msg(LL.Error, this.logPrefix~"unknown message received");
     }
 
@@ -489,7 +482,7 @@ private class MeshJunction : Junction {
         import std.digest.md : md5Of;
 
         //this.sysId[0..IDLENGTH] = "".bin.md5Of.dup;
-        this.id[0..IDLENGTH] = this.meta.info.space.bin.md5Of.dup;
+        this.id[0..IDLENGTH] = this.meta.info.space.md5Of.dup;
         this.conn = Object.factory(this.meta.conn.type).as!MeshConnector;
         if(this.conn !is null) {
             this.conn._junction = this;
@@ -521,8 +514,8 @@ private class MeshJunction : Junction {
             this.conn.unlisten();
 
             // sign off first
-            this.conn.send(Msg(this.sysId, this.id,
-                MsgCode.SignOff, Msg.getNewId));
+            this.conn.send(MsgData(this.sysId, this.id,
+                MsgCode.SignOff, MsgData.getNewId));
         
             this.conn.dispose(); GC.free(&this.conn);
             this.conn = null;
@@ -536,7 +529,7 @@ private class MeshJunction : Junction {
         import std.digest.md : md5Of;
 
         ubyte[IDLENGTH] dstId;
-        dstId[0..IDLENGTH] = dst.bin.md5Of.dup;
+        dstId[0..IDLENGTH] = dst.md5Of.dup;
         synchronized(this.cLock.reader)
             if(dstId in this.channels)
                 return this.channels[dstId];
@@ -551,7 +544,7 @@ class InProcessConnector : MeshConnector {
 
     private __gshared static ReadWriteMutex lock;
     private __gshared static InProcessConnector[ubyte[IDLENGTH]][string] pool;
-    private __gshared static Msg[][ubyte[IDLENGTH]][string] queues;
+    private __gshared static MsgData[][ubyte[IDLENGTH]][string] queues;
     private __gshared static Mutex[ubyte[IDLENGTH]][string] queueLocks;
 
     shared static this() {
@@ -612,7 +605,7 @@ class InProcessConnector : MeshConnector {
 
         this.recvThread = new Thread({
             while(this.canRecv && this.recvLock.reader.tryLock()) {
-                auto f = (Msg msg) {
+                auto f = (MsgData msg) {
                     scope(exit) 
                         this.recvLock.reader.unlock();
                     this.proc(msg);
@@ -622,11 +615,11 @@ class InProcessConnector : MeshConnector {
         }).start();
     }
 
-    private void recv(void delegate(Msg) f, void delegate() err) {
+    private void recv(void delegate(MsgData) f, void delegate() err) {
         import std.parallelism : taskPool, task;
         import std.range : front, popFront, empty;
 
-        Msg msg;
+        MsgData msg;
         synchronized(lock.reader)
             synchronized(queueLocks[this.addr][this.id]) {
                 if(!queues[this.addr][this.id].empty) {
@@ -640,7 +633,7 @@ class InProcessConnector : MeshConnector {
             }
     }
 
-    protected override bool send(Msg msg) {
+    protected override bool send(MsgData msg) {
         synchronized(lock.reader)
             try {
                 if(msg.dst == this.sysId) {
@@ -664,9 +657,9 @@ JunctionMeta addMeshJunction(
     string addr,
     string[] known,
     MeshConnectorMeta conn,
-    size_t timeout = 5000,
-    size_t ackTimeout = 0,
-    size_t ackInterval = 1,
+    ulong timeout = 5000,
+    ulong ackTimeout = 0,
+    ulong ackInterval = 1,
     ushort level = 0,
     bool hiding = false,
     bool indifferent = false,
@@ -701,9 +694,9 @@ JunctionMeta createMeshJunction(
     string addr,
     string[] known,
     MeshConnectorMeta conn,
-    size_t timeout = 5000,
-    size_t ackTimeout = 0,
-    size_t ackInterval = 1,
+    ulong timeout = 5000,
+    ulong ackTimeout = 0,
+    ulong ackInterval = 1,
     ushort level = 0,
     bool hiding = false,
     bool indifferent = false,

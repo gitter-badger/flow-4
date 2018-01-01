@@ -8,79 +8,63 @@ private import flow.core.data.engine;
 private import flow.core.data.data;
 
 /// data representing a signal
-abstract class Signal : IdData {
+abstract class Signal : IdData { mixin _data;
     private import std.uuid : UUID;
 
-    mixin data;
-
-    mixin field!(UUID, "group");
-    mixin field!(EntityPtr, "src");
+    @field UUID group;
+    @field EntityPtr src;
 }
 
 /// data representing an unicast
-class Unicast : Signal {
-    mixin data;
-
-    mixin field!(EntityPtr, "dst");
+class Unicast : Signal { mixin _data;
+    @field EntityPtr dst;
 }
 
 /// data representing a anycast
-class Anycast : Signal {
-    mixin data;
-
-    mixin field!(string, "dst");
+class Anycast : Signal { mixin _data;
+    @field string dst;
 }
 
 /// data representing a multicast
-class Multicast : Signal {
-    mixin data;
-
-    mixin field!(string, "dst");
+class Multicast : Signal { mixin _data;
+    @field string dst;
 }
 
-class Damage : Data {
-    private import flow.core.data.engine : Data;
-
-    mixin data;
-
-    mixin field!(string, "msg");
-    mixin field!(string, "type");
-    mixin field!(Data, "data");
+class Damage : Data { mixin _data;
+    @field string msg;
+    @field string type;
+    @field Data data;
 }
 
 /// metadata of a space
-class SpaceMeta : Data {
-    mixin data;
-
+class SpaceMeta : Data { mixin _data;
     /// identifier of the space
-    mixin field!(string, "id");
+    @field string id;
     
     /// amount of worker threads for executing ticks
-    mixin field!(size_t, "worker");
+    @field size_t worker;
 
     /// junctions allow signals to get shipped across spaces
-    mixin field!(JunctionMeta[], "junctions");
+    @field JunctionMeta[] junctions;
 
     /// entities of space
-    mixin field!(EntityMeta[], "entities");
+    @field EntityMeta[] entities;
 }
 
 /// info of a junction
-class JunctionInfo : Data {
-    mixin data;
-
+class JunctionInfo : Data { mixin _data;
     /// space of junction (set by space when creating junction)
-    mixin field!(string, "space");
+    @field string space;
 
     /// public RSA certificate (set by junction)
-    mixin field!(string, "crt");
+    @field string crt;
 
     /** type of cipher to use for encryption
     default AES128
     available
     - AES128
     - AES256*/
-    mixin field!(string, "cipher");
+    @field string cipher;
 
     /** type of cipher to use for encryption
     default MD5
@@ -88,87 +72,73 @@ class JunctionInfo : Data {
     - MD5
     - SHA
     - SHA256*/
-    mixin field!(string, "hash");
+    @field string hash;
 
     /// indicates if junction is checking peers with systems CA's
     /// NOTE: not supported yet
-    mixin field!(bool, "checking");
+    @field bool checking;
 
     /// indicates if junction is encrypting outbound signals
-    mixin field!(bool, "encrypting");
+    @field bool encrypting;
 
     /** this side of the junction does not inform sending side of acceptance
     therefore it keeps internals secret
     (cannot allow anycast) */
-    mixin field!(bool, "hiding"); 
+    @field bool hiding; 
 
     /** send signals into junction and do not care about acceptance
     (cannot use anycast) */
-    mixin field!(bool, "indifferent");
+    @field bool indifferent;
 
     /** refuse multicasts and anycasts passig through junction */
-    mixin field!(bool, "introvert");
+    @field bool introvert;
 }
 
 /// metadata of a junction
-class JunctionMeta : IdData {
-    mixin data;
-
-    mixin field!(JunctionInfo, "info");
-    mixin field!(string, "type");
-    mixin field!(ushort, "level");
+class JunctionMeta : IdData { mixin _data;
+    @field JunctionInfo info;
+    @field string type;
+    @field ushort level;
 
     /// path to private RSA key (no key disables encryption and authentication)
-    mixin field!(string, "key");
+    @field string key;
 }
 
-class MeshJunctionInfo : JunctionInfo {
-    mixin data;
-
-    mixin field!(string, "addr");
+class MeshJunctionInfo : JunctionInfo { mixin _data;
+    @field string addr;
 }
 
-class MeshConnectorMeta : Data {
-    mixin data;
-
-    mixin field!(string, "type");
+class MeshConnectorMeta : Data { mixin _data;
+    @field string type;
 }
 
-class MeshJunctionMeta : JunctionMeta {
-    import flow.core.data;
+class MeshJunctionMeta : JunctionMeta { mixin _data;
+    @field string[] known;
+    @field size_t timeout;
+    @field size_t ackTimeout;
+    @field size_t ackInterval;
 
-    mixin data;
-
-    mixin field!(string[], "known");
-    mixin field!(size_t, "timeout");
-    mixin field!(size_t, "ackTimeout");
-    mixin field!(size_t, "ackInterval");
-
-    mixin field!(MeshConnectorMeta, "conn");
+    @field MeshConnectorMeta conn;
 }
 
 /// metadata of an entity
-class EntityMeta : Data {
-    mixin data;
+class EntityMeta : Data { mixin _data;
+    @field EntityPtr ptr;
+    @field Data[] config;
+    @field Data[] aspects;
+    @field ushort level;
+    @field Event[] events;
+    @field Receptor[] receptors;
 
-    mixin field!(EntityPtr, "ptr");
-    mixin field!(Data[], "config");
-    mixin field!(Data[], "aspects");
-    mixin field!(ushort, "level");
-    mixin field!(Event[], "events");
-    mixin field!(Receptor[], "receptors");
+    @field TickMeta[] ticks;
 
-    mixin field!(TickMeta[], "ticks");
-
-    mixin field!(Damage[], "damages");
+    @field Damage[] damages;
 }
 
 /// referencing a specific entity 
-class EntityPtr : Data {
-    mixin data;
-
-    mixin field!(string, "id");
-    mixin field!(string, "space");
+class EntityPtr : Data { mixin _data;
+    @field string id;
+    @field string space;
 }
 
 /// type of events can occur in an entity
@@ -179,42 +149,34 @@ enum EventType {
 }
 
 /// mapping a tick to an event
-class Event : Data {
-    mixin data;
-
-    mixin field!(EventType, "type");
-    mixin field!(string, "tick");
-    mixin field!(bool, "control");
+class Event : Data { mixin _data;
+    @field EventType type;
+    @field string tick;
+    @field bool control;
 }
 
 /// metadata of a tick
-public class TickMeta : Data {
-    mixin data;
-
-    mixin field!(TickInfo, "info");
-    mixin field!(bool, "control");
-    mixin field!(Signal, "trigger");
-    mixin field!(TickInfo, "previous");
-    mixin field!(long, "time");
-    mixin field!(Data, "data");
+public class TickMeta : Data { mixin _data;
+    @field TickInfo info;
+    @field bool control;
+    @field Signal trigger;
+    @field TickInfo previous;
+    @field long time;
+    @field Data data;
 }
 
 /// info of a tick
-class TickInfo : IdData {
+class TickInfo : IdData { mixin _data;
     private import std.uuid : UUID;
 
-    mixin data;
-
-    mixin field!(EntityPtr, "entity");
-    mixin field!(string, "type");
-    mixin field!(UUID, "group");
+    @field EntityPtr entity;
+    @field string type;
+    @field UUID group;
 }
 
 /// mapping a tick to a signal
-class Receptor : Data {
-    mixin data;
-
-    mixin field!(string, "signal");
-    mixin field!(string, "tick");
-    mixin field!(bool, "control");
+class Receptor : Data { mixin _data;
+    @field string signal;
+    @field string tick;
+    @field bool control;
 }
