@@ -175,8 +175,8 @@ abstract class Data : ILockChildren {
         return super.toHash;
     }*/
 
-    /// deep clones data object (copies whole memory)
-    @property Data clone() {
+    /// deep snaps data object (copies whole memory)
+    @property Data snap() {
         import flow.core.util.templates : as;
 
         Data c = Object.factory(this.dataType).as!Data;
@@ -184,7 +184,7 @@ abstract class Data : ILockChildren {
         foreach(prop; this.properties) {
             auto pi = prop.as!PropertyInfo;
             auto val = pi.get(this);
-            pi.set(c, val.clone(pi));
+            pi.set(c, val.snap(pi));
         }
 
         return c;
@@ -209,8 +209,8 @@ mixin template data() {
                 Properties[n] = i;
     }
 
-    override @property typeof(this) clone() {
-        return cast(typeof(this))super.clone;
+    override @property typeof(this) snap() {
+        return cast(typeof(this))super.snap;
     }
 }
 
@@ -474,8 +474,8 @@ Data createData(string name) {
     return Object.factory(name).as!Data;
 }
 
-/// deep clone an array of data
-T clone(T)(T arr)
+/// deep snap an array of data
+T snap(T)(T arr)
 if(
     isArray!T &&
     is(ElementType!T : Data)
@@ -483,13 +483,13 @@ if(
     import std.range : ElementType;
     
     T cArr;
-    foreach(e; arr) cArr ~= cast(ElementType!T)e.clone;
+    foreach(e; arr) cArr ~= cast(ElementType!T)e.snap;
 
     return cArr;
 }
 
-/// deep clone an array of supported type
-T clone(T)(T arr)
+/// deep snap an array of supported type
+T snap(T)(T arr)
 if(
     isArray!T &&
     canHandle!(ElementType!T) &&
@@ -501,59 +501,59 @@ if(
     return cArr;
 }
 
-private Variant clone(Variant t, PropertyInfo pi) {
+private Variant snap(Variant t, PropertyInfo pi) {
     import std.datetime : SysTime, DateTime, Date, Duration;
     import std.uuid : UUID;
     import std.variant : Variant;
 
     if(pi.array) {
         if(pi.desc == TypeDesc.Scalar && pi.info == typeid(bool))
-            return Variant(t.get!(bool[]).clone);
+            return Variant(t.get!(bool[]).snap);
         else if(pi.desc == TypeDesc.Scalar && pi.info == typeid(byte))
-            return Variant(t.get!(byte[]).clone);
+            return Variant(t.get!(byte[]).snap);
         else if(pi.desc == TypeDesc.Scalar && pi.info == typeid(ubyte))
-            return Variant(t.get!(ubyte[]).clone);
+            return Variant(t.get!(ubyte[]).snap);
         else if(pi.desc == TypeDesc.Scalar && pi.info == typeid(short))
-            return Variant(t.get!(short[]).clone);
+            return Variant(t.get!(short[]).snap);
         else if(pi.desc == TypeDesc.Scalar && pi.info == typeid(ushort))
-            return Variant(t.get!(ushort[]).clone);
+            return Variant(t.get!(ushort[]).snap);
         else if(pi.desc == TypeDesc.Scalar && pi.info == typeid(int))
-            return Variant(t.get!(int[]).clone);
+            return Variant(t.get!(int[]).snap);
         else if(pi.desc == TypeDesc.Scalar && pi.info == typeid(uint))
-            return Variant(t.get!(uint[]).clone);
+            return Variant(t.get!(uint[]).snap);
         else if(pi.desc == TypeDesc.Scalar && pi.info == typeid(long))
-            return Variant(t.get!(long[]).clone);
+            return Variant(t.get!(long[]).snap);
         else if(pi.desc == TypeDesc.Scalar && pi.info == typeid(ulong))
-            return Variant(t.get!(ulong[]).clone);
+            return Variant(t.get!(ulong[]).snap);
         else if(pi.desc == TypeDesc.Scalar && pi.info == typeid(float))
-            return Variant(t.get!(float[]).clone);
+            return Variant(t.get!(float[]).snap);
         else if(pi.desc == TypeDesc.Scalar && pi.info == typeid(double))
-            return Variant(t.get!(double[]).clone);
+            return Variant(t.get!(double[]).snap);
         else if(pi.desc == TypeDesc.Scalar && pi.info == typeid(char))
-            return Variant(t.get!(char[]).clone);
+            return Variant(t.get!(char[]).snap);
         else if(pi.desc == TypeDesc.Scalar && pi.info == typeid(wchar))
-            return Variant(t.get!(wchar[]).clone);
+            return Variant(t.get!(wchar[]).snap);
         else if(pi.desc == TypeDesc.Scalar && pi.info == typeid(dchar))
-            return Variant(t.get!(dchar[]).clone);
+            return Variant(t.get!(dchar[]).snap);
         else if(pi.desc == TypeDesc.UUID)
-            return Variant(t.get!(UUID[]).clone);
+            return Variant(t.get!(UUID[]).snap);
         else if(pi.desc == TypeDesc.SysTime)
-            return Variant(t.get!(SysTime[]).clone);
+            return Variant(t.get!(SysTime[]).snap);
         else if(pi.desc == TypeDesc.DateTime)
-            return Variant(t.get!(DateTime[]).clone);
+            return Variant(t.get!(DateTime[]).snap);
         else if(pi.desc == TypeDesc.Date)
-            return Variant(t.get!(Date[]).clone);
+            return Variant(t.get!(Date[]).snap);
         else if(pi.desc == TypeDesc.Duration)
-            return Variant(t.get!(Duration[]).clone);
+            return Variant(t.get!(Duration[]).snap);
         else if(pi.desc == TypeDesc.String)
-            return Variant(t.get!(string[]).clone);
+            return Variant(t.get!(string[]).snap);
         else if(pi.desc == TypeDesc.Data)
-            return Variant(t.get!(Data[]).clone);
+            return Variant(t.get!(Data[]).snap);
         else assert(false, "this is an impossible situation");
     } else {
         if(pi.desc == TypeDesc.Data) {
             auto d = t.get!(Data);
-            return Variant(d !is null ? d.clone : null);
+            return Variant(d !is null ? d.snap : null);
         }
         else return t;
     }
@@ -639,7 +639,7 @@ unittest { test.header("data.engine: static data usage");
     d.nanA ~= double.nan; assert(d.nanA.length == 1 && d.nanA[0] is double.nan, "could not set second level basic scalar");
 test.footer(); }
 
-unittest { test.header("data.engine: clone and == of data and member");
+unittest { test.header("data.engine: snap and == of data and member");
     import flow.core.util.templates : as;
 
     auto d = new InheritedTestData;
@@ -654,20 +654,20 @@ unittest { test.header("data.engine: clone and == of data and member");
     d.enumerationA = [TestEnum.Bar, TestEnum.Foo];
     d.additional = "ble";
 
-    auto d2 = d.clone().as!InheritedTestData;
+    auto d2 = d.snap().as!InheritedTestData;
  
-    assert(d !is d2, "clones references are matching");
-    assert(d2.uinteger == 5, "could not clone basic scalar value");
-    assert(d2.text == "foo", "could not clone basic string value");   
-    assert(d2.inner !is null && d2.inner !is d.inner, "could not clone basic data value");
-    assert(d2.inner.integer == 3, "could not clone property of basic data value");
-    assert(d2.enumeration == TestEnum.Bar, "could not clone basic enum value");
-    assert(d2.uintegerA.length == 2 && d2.uintegerA[0] == 3 && d2.uintegerA[1] == 4 && d2.uintegerA !is d.uintegerA, "could not clone array scalar value");
-    assert(d2.textA.length == 2 && d2.textA[0] == "foo" && d2.textA[1] == "bar", "could not clone array string value");
+    assert(d !is d2, "snaps references are matching");
+    assert(d2.uinteger == 5, "could not snap basic scalar value");
+    assert(d2.text == "foo", "could not snap basic string value");   
+    assert(d2.inner !is null && d2.inner !is d.inner, "could not snap basic data value");
+    assert(d2.inner.integer == 3, "could not snap property of basic data value");
+    assert(d2.enumeration == TestEnum.Bar, "could not snap basic enum value");
+    assert(d2.uintegerA.length == 2 && d2.uintegerA[0] == 3 && d2.uintegerA[1] == 4 && d2.uintegerA !is d.uintegerA, "could not snap array scalar value");
+    assert(d2.textA.length == 2 && d2.textA[0] == "foo" && d2.textA[1] == "bar", "could not snap array string value");
     assert(d2.innerA.length == 2 && d2.innerA[0] !is null && d2.innerA[1] !is null && d2.innerA[0] !is d2.innerA[1] && d2.innerA[0] !is d.innerA[0], "could not set array data value");
-    assert(d2.enumerationA.length == 2 && d2.enumerationA[0] == TestEnum.Bar && d2.enumerationA[1] == TestEnum.Foo && d2.enumerationA !is d.enumerationA, "could not clone array enum value");
+    assert(d2.enumerationA.length == 2 && d2.enumerationA[0] == TestEnum.Bar && d2.enumerationA[1] == TestEnum.Foo && d2.enumerationA !is d.enumerationA, "could not snap array enum value");
 
-    assert(d2.additional == "ble", "could not clone basic scalar value");
+    assert(d2.additional == "ble", "could not snap basic scalar value");
 
-    assert(d == d2, "clones don't ==");
+    assert(d == d2, "snaps don't ==");
 test.footer(); }

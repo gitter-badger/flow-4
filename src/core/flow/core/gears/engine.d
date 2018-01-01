@@ -26,9 +26,9 @@ abstract class Tick {
 
     private Throwable thr;
 
-    protected @property TickInfo info() {return this.meta.info !is null ? this.meta.info.clone : null;}
-    protected @property Signal trigger() {return this.meta.trigger !is null ? this.meta.trigger.clone : null;}
-    protected @property TickInfo previous() {return this.meta.previous !is null ? this.meta.previous.clone : null;}
+    protected @property TickInfo info() {return this.meta.info !is null ? this.meta.info.snap : null;}
+    protected @property Signal trigger() {return this.meta.trigger !is null ? this.meta.trigger.snap : null;}
+    protected @property TickInfo previous() {return this.meta.previous !is null ? this.meta.previous.snap : null;}
     protected @property Data data() {return this.meta.data;}
     protected @property size_t count() {return this.meta.control ? this.entity.count : size_t.init;}
 
@@ -404,7 +404,7 @@ private class Entity : StateMachine!SystemState {
                 
                 if(t !is null) {
                     t.meta = m;
-                    t.meta.info.entity = this.meta.ptr.clone;
+                    t.meta.info.entity = this.meta.ptr.snap;
 
                     return t;
                 }
@@ -857,13 +857,13 @@ private class Entity : StateMachine!SystemState {
         return this.space.send(s);
     }
 
-    /** creates a snapshot of entity(deep clone)
+    /** creates a snapshot of entity(deep snap)
     if entity is not in frozen state an exception is thrown */
     EntityMeta snap() {
         synchronized(this.meta.reader) {
             this.ensureState(SystemState.Frozen);
-            // if someone snaps using this function, it is another entity. it will only get a deep clone.
-            return this.meta.clone;
+            // if someone snaps using this function, it is another entity. it will only get a deep snap.
+            return this.meta.snap;
         }
     }
 }
@@ -894,8 +894,8 @@ class EntityController {
 
     private Entity _entity;
 
-    /// deep clone of entity pointer of controlled entity
-    @property EntityPtr entity() {return this._entity.meta.ptr.clone;}
+    /// deep snap of entity pointer of controlled entity
+    @property EntityPtr entity() {return this._entity.meta.ptr.snap;}
 
     /// state of entity
     @property SystemState state() {return this._entity.state;}
@@ -906,10 +906,10 @@ class EntityController {
     /// target path for entity storing
     @property string target() {return this._entity.target;}
 
-    /// deep clone of entity context
+    /// deep snap of entity context
     @property Data[] aspects() {return this._entity.meta.aspects;}
 
-    /// deep clone of entity context
+    /// deep snap of entity context
     @property Damage[] damages() {return this._entity.meta.damages;}
 
     private this(Entity e) {
@@ -1548,7 +1548,7 @@ class Space : StateMachine!SystemState {
             e.freeze();
     }
 
-    /// snapshots whole space (deep clone)
+    /// snapshots whole space (deep snap)
     SpaceMeta snap() {
         if(this.state == SystemState.Ticking) {
             this.state = SystemState.Frozen;
@@ -1556,7 +1556,7 @@ class Space : StateMachine!SystemState {
         }
 
         synchronized(this.lock.reader)
-            return this.meta.clone;
+            return this.meta.snap;
     }
 
     /// makes all of spaces content storing
@@ -1730,7 +1730,7 @@ class Space : StateMachine!SystemState {
 
         auto isMe = s.dst.space == this.meta.id || this.meta.id.matches(s.dst.space);
         /* Only inside own space memory is shared,
-        as soon as a signal is getting shiped to another space it is deep cloned */
+        as soon as a signal is getting shiped to another space it is deep snapd */
         return isMe ? this.route(s, 0) : this.ship(s);
     }
 
@@ -1740,7 +1740,7 @@ class Space : StateMachine!SystemState {
 
         auto isMe = s.dst == this.meta.id || this.meta.id.matches(s.dst);
         /* Only inside own space memory is shared,
-        as soon as a signal is getting shiped to another space it is deep cloned */
+        as soon as a signal is getting shiped to another space it is deep snapd */
         return isMe ? this.route(s, 0) : this.ship(s);
     }
 
@@ -1750,7 +1750,7 @@ class Space : StateMachine!SystemState {
 
         auto isMe = s.dst == this.meta.id || this.meta.id.matches(s.dst);
         /* Only inside own space memory is shared,
-        as soon as a signal is getting shiped to another space it is deep cloned */
+        as soon as a signal is getting shiped to another space it is deep snapd */
         return isMe ? this.route(s, 0) : this.ship(s);
     }
 
@@ -1917,7 +1917,7 @@ TickMeta addTick(EntityMeta em, string type, Data d = null, UUID group = randomU
     tm.info = new TickInfo;
     tm.info.id = randomUUID;
     tm.info.type = type;
-    tm.info.entity = em.ptr.clone;
+    tm.info.entity = em.ptr.snap;
     tm.info.group = group;
     tm.data = d;
     tm.control = control;

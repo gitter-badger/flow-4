@@ -1,5 +1,6 @@
 * [Overview](doc/overview.md)
 * [Basics](doc/basics.md)
+* [Entities](doc/entities.md)
 * [Introduction](doc/introduction.md)
 * [Credits](doc/credits.md)
 * [Howto file a bug](doc/howto_bug.md)
