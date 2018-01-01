@@ -432,28 +432,32 @@ private class Entity : StateMachine!SystemState {
                 this.opLock.reader.unlock();
             
             synchronized(this.lock.reader) { 
-                if(this.state == SystemState.Ticking) {
+                if(this.state == SystemState.Ticking && this.execLock.reader.tryLock()) {
                     // create a new tick of given type or notify failing and stop
                     switch(nm.info.type) {
                         case fqn!EntityFreezeSystemTick:
                             auto control = nm.control;
                             if(control)
                                 this.freezeAsync(); // async for avoiding deadlock
+                            this.execLock.reader.unlock();
                             break;
                         case fqn!EntityStoreSystemTick:
                             auto control = nm.control;
                             if(control)
                                 this.storeAsync(); // async for avoiding deadlock
+                            this.execLock.reader.unlock();
                             break;
                         case fqn!SpaceFreezeSystemTick:
                             auto control = nm.control;
                             if(control)
                                 this.spaceFreezeAsync(); // async for avoiding deadlock
+                            this.execLock.reader.unlock();
                             break;
                         case fqn!SpaceStoreSystemTick:
                             auto control = nm.control;
                             if(control)
                                 this.spaceStoreAsync(); // async for avoiding deadlock
+                            this.execLock.reader.unlock();
                             break;
                         default:
                             this.exec(this.pop(nm));
@@ -473,9 +477,6 @@ private class Entity : StateMachine!SystemState {
         taskPool.put(task((Tick t){
             scope(exit)
                 this.opLock.reader.unlock();
-
-            // registering an execution on entity
-            this.execLock.reader.lock();
 
             t.job = Job(&t.exec, &t.catchError, t.meta.time);
             this.space.proc.run(&t.job);
@@ -616,13 +617,17 @@ private class Entity : StateMachine!SystemState {
                 if(e.control)
                     t.meta.control = true;
 
-                if(t.accept)
+                if(t.accept) {
+                	this.execLock.reader.lock();
                     this.exec(t);
+                }
             }       
 
             // creating and starting all frozen ticks
-            foreach(tm; this.meta.ticks)
-                this.exec(this.pop(tm));
+            foreach(tm; this.meta.ticks) {
+                this.execLock.reader.lock();
+            	this.exec(this.pop(tm));
+            }
 
             // all frozen ticks are ticking -> empty store
             this.meta.ticks = TickMeta[].init;
@@ -645,8 +650,10 @@ private class Entity : StateMachine!SystemState {
                 if(e.control)
                     t.meta.control = true;
 
-                if(t.accept)
+                if(t.accept) {
+                	this.execLock.reader.lock();
                     this.exec(t);
+                }
             } 
         }
 

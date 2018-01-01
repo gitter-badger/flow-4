@@ -215,9 +215,9 @@ private GenCipher genCipher(string cipher, string hash) {
         case SSL_TXT_AES256~SSL_TXT_MD5:
             return genCipher!(SSL_TXT_AES256~"+"~SSL_TXT_MD5, "EVP_aes_256_cbc", "EVP_md5", 32)();
         case SSL_TXT_AES128~SSL_TXT_SHA:
-            return genCipher!(SSL_TXT_AES128~"+"~SSL_TXT_SHA, "EVP_aes_128_cbc", "EVP_sha", 16)();
+            return genCipher!(SSL_TXT_AES128~"+"~SSL_TXT_SHA, "EVP_aes_128_cbc", "EVP_sha1", 16)();
         case SSL_TXT_AES256~SSL_TXT_SHA:
-            return genCipher!(SSL_TXT_AES256~"+"~SSL_TXT_SHA, "EVP_aes_256_cbc", "EVP_sha", 32)();
+            return genCipher!(SSL_TXT_AES256~"+"~SSL_TXT_SHA, "EVP_aes_256_cbc", "EVP_sha1", 32)();
         case SSL_TXT_AES128~SSL_TXT_SHA256:
             return genCipher!(SSL_TXT_AES128~"+"~SSL_TXT_SHA256, "EVP_aes_128_cbc", "EVP_sha256", 16)();
         case SSL_TXT_AES256~SSL_TXT_SHA256:
@@ -275,25 +275,26 @@ private ubyte[] encrypt(string title, string cipherFunc)(ref ubyte[] data, GenCi
     import deimos.openssl.err : ERR_error_string, ERR_get_error;
     import std.conv : to;
 
-    EVP_CIPHER_CTX ctx;
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new;
+    scope(exit) EVP_CIPHER_CTX_free(ctx);
     
-    EVP_CIPHER_CTX_init(&ctx);
-    scope(exit) EVP_CIPHER_CTX_cleanup(&ctx);
-    if(!EVP_EncryptInit_ex(&ctx, mixin(cipherFunc)(), null, ciph.key.ptr, ciph.iv.ptr))
+    //EVP_CIPHER_CTX_init(&ctx);
+    //scope(exit) EVP_CIPHER_CTX_cleanup(&ctx);
+    if(!EVP_EncryptInit_ex(ctx, mixin(cipherFunc)(), null, ciph.key.ptr, ciph.iv.ptr))
         new CryptoException("couldn't initialize "~title~" encryption context");
 
     // double check
-    if(!EVP_EncryptInit_ex(&ctx, null, null, null, null))
+    if(!EVP_EncryptInit_ex(ctx, null, null, null, null))
         new CryptoException("couldn't initialize "~title~" encryption context");
 
     auto buf = new ubyte[data.length+AES_BLOCK_SIZE];
     auto ds = data.length.to!int;
     int bs, fs;
 
-    if(!EVP_EncryptUpdate(&ctx, buf.ptr, &bs, data.ptr, ds))
+    if(!EVP_EncryptUpdate(ctx, buf.ptr, &bs, data.ptr, ds))
         throw new CryptoException("cipher encryption error: "~ERR_error_string(ERR_get_error(), null).to!string);
     
-    if(!EVP_EncryptFinal_ex(&ctx, buf.ptr+bs, &fs))
+    if(!EVP_EncryptFinal_ex(ctx, buf.ptr+bs, &fs))
         throw new CryptoException("cipher encryption error: "~ERR_error_string(ERR_get_error(), null).to!string);
 
     buf.length = bs+fs;
@@ -320,25 +321,26 @@ private ubyte[] decrypt(string title, string cipherFunc)(ref ubyte[] crypt, GenC
     import deimos.openssl.err : ERR_error_string, ERR_get_error;
     import std.conv : to;
 
-    EVP_CIPHER_CTX ctx;
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new;
+    scope(exit) EVP_CIPHER_CTX_free(ctx);
     
-    EVP_CIPHER_CTX_init(&ctx);
-    scope(exit) EVP_CIPHER_CTX_cleanup(&ctx);
-    if(!EVP_DecryptInit_ex(&ctx, mixin(cipherFunc)(), null, ciph.key.ptr, ciph.iv.ptr))
+    //EVP_CIPHER_CTX_init(&ctx);
+    //scope(exit) EVP_CIPHER_CTX_cleanup(&ctx);
+    if(!EVP_DecryptInit_ex(ctx, mixin(cipherFunc)(), null, ciph.key.ptr, ciph.iv.ptr))
         new CryptoException("couldn't initialize "~title~" decryption context");
 
     // double check
-    if(!EVP_DecryptInit_ex(&ctx, null, null, null, null))
+    if(!EVP_DecryptInit_ex(ctx, null, null, null, null))
         new CryptoException("couldn't initialize "~title~" encryption context");
 
     auto buf = new ubyte[crypt.length];            
     auto ds = crypt.length.to!int;
     int bs, fs;
 
-    if(!EVP_DecryptUpdate(&ctx, buf.ptr, &bs, crypt.ptr, ds))
+    if(!EVP_DecryptUpdate(ctx, buf.ptr, &bs, crypt.ptr, ds))
         throw new CryptoException("cipher decryption error: "~ERR_error_string(ERR_get_error(), null).to!string);
 
-    if(!EVP_DecryptFinal_ex(&ctx, buf.ptr+bs, &fs))
+    if(!EVP_DecryptFinal_ex(ctx, buf.ptr+bs, &fs))
         throw new CryptoException("cipher decryption error: "~ERR_error_string(ERR_get_error(), null).to!string);
 
     buf.length = bs+fs;
@@ -653,15 +655,15 @@ private void loadSSL() {
 
     // initializing ssl
     ERR_load_CRYPTO_strings();
-    OpenSSL_add_all_algorithms();
+    //OpenSSL_add_all_algorithms();
     OPENSSL_config(null);
 }
 
 private void cleanSSL() {
     import deimos.openssl.err;
 
-    EVP_cleanup();
-    ERR_free_strings();
+    //EVP_cleanup();
+    //ERR_free_strings();
 }
 
 package final class Crypto {
