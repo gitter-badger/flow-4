@@ -1706,9 +1706,9 @@ class Space : StateMachine!SystemState {
 
         // creating processor;
         // default is one core
-        if(this.meta.worker < 1)
-            this.meta.worker = 1;
-        this.proc = new Processor(this.meta.worker);
+        if(this.meta.pipes < 1)
+            this.meta.pipes = 1;
+        this.proc = new Processor(this.meta.pipes);
         this.proc.start();
 
         // creating junctions
@@ -2238,10 +2238,10 @@ class Process {
 }
 
 /// creates space metadata
-SpaceMeta createSpace(string id, size_t worker = 1) {
+SpaceMeta createSpace(string id, size_t pipes = 1) {
     auto sm = new SpaceMeta;
     sm.id = id;
-    sm.worker = worker;
+    sm.pipes = pipes;
 
     return sm;
 }

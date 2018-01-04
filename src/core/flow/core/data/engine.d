@@ -3,7 +3,6 @@ module flow.core.data.engine;
 private import std.variant;
 private import std.range;
 private import std.traits;
-private import flow.core.data.mutex;
 private import flow.core.util;
 private import msgpack;
 
@@ -83,10 +82,6 @@ struct PropertyInfo {
 	bool function(Data, Data) equals;
     void function(Data, ref Packer, ref string[][string]) bin;
     void function(Data, ref Unpacker, ref string[][string]) unbin;
-	void function(Data) lockReader;
-	void function(Data) lockWriter;
-	void function(Data) unlockReader;
-	void function(Data) unlockWriter;
 
     /// gets the value as variant
     Variant get(Data d) {
@@ -109,10 +104,6 @@ abstract class Data {
     /// returns all properties of data type
     @property shared(PropertyInfo[string]) properties(){return null;}
 
-    @nonPacked protected DataMutex lock;
-    @nonPacked DataMutex.Reader reader() {return this.lock.reader;}
-    @nonPacked DataMutex.Writer writer() {return this.lock.writer;}
-
     /// returns data type name
     @nonPacked abstract @property string dataType();
 
@@ -129,43 +120,6 @@ abstract class Data {
             return true;
         } else return false;
     }
-
-    this() {
-        import flow.core.util;
-
-        RecursiveLocker rl;
-        rl.readerLock = &this.readerLockChilds;
-        rl.writerLock = &this.writerLockChilds;
-        rl.readerUnlock = &this.readerUnlockChilds;
-        rl.writerUnlock = &this.writerUnlockChilds;
-
-        this.lock = new DataMutex(rl, DataMutex.Policy.PREFER_WRITERS);
-    }
-
-    void readerLockChilds() {
-        foreach(pi; this.properties)
-            pi.as!PropertyInfo.lockReader(this);
-    }
-
-    void writerLockChilds() {
-        foreach(pi; this.properties)
-            pi.as!PropertyInfo.lockWriter(this);
-    }
-
-    void readerUnlockChilds() {
-        foreach(pi; this.properties)
-            pi.as!PropertyInfo.unlockReader(this);
-    }
-
-    void writerUnlockChilds() {
-        foreach(pi; this.properties)
-            pi.as!PropertyInfo.unlockWriter(this);
-    }
-
-    /*override ulong toHash() {
-        // TODO collect all hashes of properties and generate collective hash
-        return super.toHash;
-    }*/
 
     /// deep snaps data object (copies whole memory)
     @property Data snap() {
@@ -256,26 +210,6 @@ mixin template _data() {
             t."~name~" = unbin!("~T.stringof~")(u, ti);
         };");
 
-        pi.lockReader = (d) {
-            static if(is(T : Data))
-                d.reader.lock();
-        };
-
-        pi.lockWriter = (d) {
-            static if(is(T : Data))
-                d.writer.lock();
-        };
-
-        pi.unlockReader = (d) {
-            static if(is(T : Data))
-                d.reader.unlock();
-        };
-
-        pi.unlockWriter = (d) {
-            static if(is(T : Data))
-                d.writer.unlock();
-        };
-
         if(isScalarType!T) pi.desc = TypeDesc.Scalar;
         else if(is(T : Data)) pi.desc = TypeDesc.Data;
         else if(is(T == UUID)) pi.desc = TypeDesc.UUID;
@@ -354,30 +288,6 @@ mixin template _data() {
             auto t = d.as!(typeof(this));
             t."~name~" = unbin!("~AT.stringof~")(u, ti);
         };");
-
-        pi.lockReader = (a) {
-            static if(is(ElementType!T : Data))
-                foreach(d; a)
-                    d.reader.lock();
-        };
-
-        pi.lockWriter = (a) {
-            static if(is(ElementType!T : Data))
-                foreach(d; a)
-                    d.writer.lock();
-        };
-
-        pi.unlockReader = (a) {
-            static if(is(ElementType!T : Data))
-                foreach(d; a)
-                    d.reader.unlock();
-        };
-
-        pi.unlockWriter = (a) {
-            static if(is(ElementType!T : Data))
-                foreach(d; a)
-                    d.writer.unlock();
-        };
 
         if(isScalarType!T) pi.desc = TypeDesc.Scalar;
         else if(is(T : Data)) pi.desc = TypeDesc.Data;

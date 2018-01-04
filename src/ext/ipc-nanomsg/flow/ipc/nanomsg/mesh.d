@@ -454,7 +454,7 @@ unittest { test.header("ipc.nanomsg.mesh: fully enabled passing of signals via t
     auto sm1 = createSpace(spc1Domain);
     auto ems = sm1.addEntity("sending");
     auto a = new TestSendingAspect; ems.aspects ~= a;
-    a.wait = 500;
+    a.wait = 100;
     a.dstEntity = "receiving";
     a.dstSpace = spc2Domain;
     ems.addTick(fqn!UnicastSendingTestTick);
@@ -470,7 +470,7 @@ unittest { test.header("ipc.nanomsg.mesh: fully enabled passing of signals via t
     conn1.wait = 1;
     conn1.retry = 2;
     conn1.threads = 1;
-    sm1.addMeshJunction(junctionId, "tcp://127.0.0.1:60000", [], conn1, 1500, 1500, 300);
+    sm1.addMeshJunction(junctionId, "tcp://127.0.0.1:60000", [], conn1, 300, 300, 30);
 
     auto sm2 = createSpace(spc2Domain);
     auto emr = sm2.addEntity("receiving");
@@ -486,7 +486,7 @@ unittest { test.header("ipc.nanomsg.mesh: fully enabled passing of signals via t
     conn2.wait = 1;
     conn2.retry = 2;
     conn2.threads = 1;
-    sm2.addMeshJunction(junctionId, "tcp://127.0.0.1:60010", ["tcp://127.0.0.1:60000"], conn2, 1500, 1500, 300);
+    sm2.addMeshJunction(junctionId, "tcp://127.0.0.1:60010", ["tcp://127.0.0.1:60000"], conn2, 200, 200, 20);
     
     auto spc1 = proc.add(sm1);
     auto spc2 = proc.add(sm2);
@@ -495,7 +495,7 @@ unittest { test.header("ipc.nanomsg.mesh: fully enabled passing of signals via t
     spc2.tick();
     spc1.tick();
 
-    Thread.sleep(2000.msecs);
+    Thread.sleep(300.msecs);
 
     spc2.freeze();
     spc1.freeze();

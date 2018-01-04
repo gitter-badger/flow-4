@@ -41,8 +41,8 @@ class SpaceMeta : Data { mixin _data;
     /// identifier of the space
     @field string id;
     
-    /// amount of worker threads for executing ticks
-    @field size_t worker;
+    /// amount of pipes threads for executing ticks
+    @field size_t pipes;
 
     /// junctions allow signals to get shipped across spaces
     @field JunctionMeta[] junctions;
@@ -122,7 +122,7 @@ class MeshJunctionMeta : JunctionMeta { mixin _data;
 }
 
 /// metadata of an entity
-class EntityMeta : Data { mixin _data;
+class EntityMeta : LockData { mixin _data;
     @field EntityPtr ptr;
     @field Data[] config;
     @field Data[] aspects;
