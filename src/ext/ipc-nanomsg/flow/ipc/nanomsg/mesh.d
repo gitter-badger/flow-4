@@ -21,13 +21,14 @@ class NanoMsgConnectorMeta : MeshConnectorMeta { mixin _data;
     @field string listen;
     @field string subListen;
     @field string subAddr;
-    @field ulong threads;
 }
 
 private struct NanoMsgDest {
-    import msgpack : nonPacked;
+    private import core.sync.mutex : Mutex;
+    private import msgpack : nonPacked;
 
-    @nonPacked int ep = -1;
+    @nonPacked Mutex pushLock;
+    @nonPacked int pushSock = -1; // outbound
 
     string subAddr;
 
@@ -39,14 +40,13 @@ class NanoMsgConnector : MeshConnector {
     private import core.sync.rwmutex : ReadWriteMutex;
     private import deimos.nanomsg.nn;
     private import deimos.nanomsg.bus;
-    private import deimos.nanomsg.pubsub;
+    private import deimos.nanomsg.pipeline;
 
     private int busSock;
-    private int pubSock;
-    private int subSock;
+    private int pullSock; // inbound
 
     private ReadWriteMutex recvLock;
-    private Mutex sendBusLock, sendPubLock;
+    private Mutex sendBusLock;
 
     private bool canRecv;
 
@@ -59,9 +59,13 @@ class NanoMsgConnector : MeshConnector {
 
     /// ctor
     this() {
+        /*
+        t.job = Job(&t.exec, &t.catchError, t.meta.time);
+            this.space.proc.run(&t.job);
+        */
+
         this.recvLock = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_WRITERS);
         this.sendBusLock = new Mutex;
-        this.sendPubLock = new Mutex;
         super();
     }
     
@@ -74,10 +78,6 @@ class NanoMsgConnector : MeshConnector {
 
         this._info = info.pack;
 
-        // ensure it can receive something
-        if(this.meta.threads < 1)
-            this.meta.threads = 1;
-
         try {
             return this.initSocks();
         } catch(Throwable thr) {
@@ -87,13 +87,6 @@ class NanoMsgConnector : MeshConnector {
     }
 
     protected override void dispose() {
-        synchronized(this.recvLock.writer)
-            this.canRecv = false;
-
-        this.close(this.pubSock);
-        this.close(this.subSock);
-        this.close(this.busSock);
-
         super.dispose();
     }
 
@@ -111,6 +104,11 @@ class NanoMsgConnector : MeshConnector {
     protected override void unlisten() {
         synchronized(this.recvLock.writer)
             this.canRecv = false;
+
+        foreach(d; this.dests)
+            this.close(d.pushSock);
+        this.close(this.pullSock);
+        this.close(this.busSock);
     }
 
     private bool initSocks() {
@@ -131,69 +129,69 @@ class NanoMsgConnector : MeshConnector {
             return false;
         }
 
-        if(!this.createPub()) return false;
-
-        this.subSock = nn_socket(AF_SP, NN_SUB);
-        if(this.subSock < 0) {
-            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") creating subscriber failed: "~nn_err_strerror (errno).to!string);
+        this.pullSock = nn_socket(AF_SP, NN_PULL);
+        if(this.pullSock < 0) {
+            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") creating pull failed: "~nn_err_strerror (errno).to!string);
             return false;
         } else
-            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") created subscriber "~this.subSock.to!string);
+            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") created pull "~this.pullSock.to!string);
 
-        if(nn_setsockopt(this.subSock, NN_SUB, NN_SUB_SUBSCRIBE, this.id.ptr, this.id.length) < 0) {
-            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") setting sub failed: "~nn_err_strerror (errno).to!string);
+        if(nn_setsockopt(this.pullSock, NN_SOL_SOCKET, NN_RCVTIMEO, &timeout, timeout.sizeof) < 0) {
+            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") setting pull timeout failed: "~nn_err_strerror (errno).to!string);
             return false;
         }
 
-        if(nn_setsockopt(this.subSock, NN_SOL_SOCKET, NN_RCVTIMEO, &timeout, timeout.sizeof) < 0) {
-            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") setting sub timeout failed: "~nn_err_strerror (errno).to!string);
-            return false;
-        }
+        if(!this.createPush()) return false;
 
         Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") initialized");
         return true;
     }
 
-    private bool createPub() {
+    private bool createPush() {
         import std.conv : to;
         import std.digest : toHexString;
 
-        this.pubSock = nn_socket(AF_SP, NN_PUB);
-        if(this.pubSock < 0) {
-            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") creating publisher failed: "~nn_err_strerror (errno).to!string);
-            return false;
-        } else
-            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") created publisher "~this.pubSock.to!string);
-
-        foreach(i, d; this.dests)
-            d.ep = this.connectPub(d.subAddr);
+        foreach(i, d; this.dests) {
+            d.pushLock = new Mutex;
+            d.pushSock = this.connectPush(d.subAddr);
+        }
 
         return true;
     }
 
-    private int connectPub(string sub) {
+    private int connectPush(string push) {
         import std.conv : to;
         import std.digest : toHexString;
         import std.string : toStringz;
 
-        int ep;
-        for(size_t i = 0; i < this.meta.retry+1; i++) {
-            ep = nn_connect(this.pubSock, sub.toStringz);
-            if(ep >= 0)
-                break;
-            else
-                Thread.sleep(5.msecs);
+        auto pushSock = nn_socket(AF_SP, NN_PUSH);
+        if(pushSock < 0) {
+            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") creating push failed: "~nn_err_strerror (errno).to!string);
+        } else {
+            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") created push "~pushSock.to!string);
+
+            int ep;
+            for(size_t i = 0; i < this.meta.retry+1; i++) {
+                ep = nn_connect(pushSock, push.toStringz);
+                if(ep >= 0)
+                    break;
+                else
+                    Thread.sleep(5.msecs);
+            }
+
+            if(ep < 0) {
+                Log.msg(LL.Info, "nanomsg("~this.id.toHexString.to!string~") connecting to push failed: "~nn_err_strerror (errno).to!string);
+                this.close(pushSock);
+                pushSock = -1;
+            } else
+                Log.msg(LL.Message, "nanomsg("~this.id.toHexString.to!string~") connected to push "~push~" as endpoint "~ep.to!string);
         }
 
-        if(ep < 0)
-            Log.msg(LL.Info, "nanomsg("~this.id.toHexString.to!string~") connecting to sub failed: "~nn_err_strerror (errno).to!string);
-        else
-            Log.msg(LL.Message, "nanomsg("~this.id.toHexString.to!string~") connected to sub "~sub~" as endpoint "~ep.to!string);
 
-        if(this.meta.wait > 0)
+        if(pushSock >= 0 && this.meta.wait > 0)
             Thread.sleep(this.meta.wait.msecs);
 
-        return ep;
+        return pushSock;
     }
 
     private bool bind() {
@@ -207,7 +205,7 @@ class NanoMsgConnector : MeshConnector {
         } else
             debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") listening to bus "~this.meta.listen);
 
-        if(nn_bind(this.subSock, this.meta.subListen.toStringz) < 0) {
+        if(nn_bind(this.pullSock, this.meta.subListen.toStringz) < 0) {
             Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") binding sub failed: "~nn_err_strerror (errno).to!string);
             return false;
         } else
@@ -256,36 +254,32 @@ class NanoMsgConnector : MeshConnector {
         return true;
     }
 
+    private Thread recvBusThread, recvPullThread;
     private void recv() {
         this.canRecv = true;
 
-        // spawn n threads listening to sys channel
-        for(size_t i = 0; i < this.meta.threads; i++) {
-            new Thread({
-                auto l = new Mutex;
-                while(this.canRecv && this.recvLock.reader.tryLock()) {
-                    this.recv(this.busSock, 0, l, (pkg) {
-                        scope(exit) 
-                            this.recvLock.reader.unlock();
-                        this.proc(pkg);
-                    }, &this.recvLock.reader.unlock);
-                }
-            }).start();
+        this.recvBusThread = new Thread({
+            while(this.canRecv && this.recvLock.reader.tryLock()) {
+                this.recv(this.busSock, (pkg) {
+                    scope(exit) 
+                        this.recvLock.reader.unlock();
+                    this.handle(pkg);
+                }, &this.recvLock.reader.unlock);
+            }
+        }).start();
 
-            new Thread({
-                auto l = new Mutex;
-                while(this.canRecv && this.recvLock.reader.tryLock()) {
-                    this.recv(this.subSock, IDLENGTH, l, (pkg) {
-                        scope(exit) 
-                            this.recvLock.reader.unlock();
-                        this.proc(pkg);
-                    }, &this.recvLock.reader.unlock);
-                }
-            }).start();
-        }
+        this.recvPullThread = new Thread({
+            while(this.canRecv && this.recvLock.reader.tryLock()) {
+                this.recv(this.pullSock, (pkg) {
+                    scope(exit) 
+                        this.recvLock.reader.unlock();
+                    this.handle(pkg);
+                }, &this.recvLock.reader.unlock);
+            }
+        }).start();
     }
 
-    private void proc(ubyte[] pkg) {
+    private void handle(ubyte[] pkg) {
         import msgpack : unpack;
         import std.conv : to;
         import std.digest : toHexString;
@@ -296,24 +290,22 @@ class NanoMsgConnector : MeshConnector {
             Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") deserializing message failed", thr);
         }
         debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") recv("~msg.id.to!string~", "~msg.code.to!string~") from "~msg.src.toHexString.to!string);
-        super.proc(msg);
+        super.handle(msg);
     }
 
-    private void recv(int sock, size_t trim, Mutex l, void delegate(ubyte[]) f, void delegate() err) {
+    private void recv(int sock, void delegate(ubyte[]) f, void delegate() err) {
         import std.conv : to;
         import std.digest : toHexString;
         import std.parallelism : taskPool, task;
 
         void* buf;
-        int rc;
-        synchronized(l)
-            rc = nn_recv (sock, &buf, NN_MSG, 0);
+        int rc = nn_recv (sock, &buf, NN_MSG, 0);
 
         // somewhere a deadlock? check it err() is executed on all alternative paths
         if(rc >= 0) {
-            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") recv "~(rc-trim).to!string~" bytes via "~sock.to!string);
+            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") recv "~rc.to!string~" bytes via "~sock.to!string);
             scope(exit) nn_freemsg (buf);
-            auto pkg = buf.as!(ubyte*)[trim..rc].as!(ubyte[]).dup;
+            auto pkg = buf.as!(ubyte*)[0..rc].as!(ubyte[]).dup;
             taskPool.put(task(f, pkg));
         } else {
             if(errno != ETIMEDOUT)
@@ -329,15 +321,18 @@ class NanoMsgConnector : MeshConnector {
         
         auto r = false;
         // if there is no channel or channel requires passive connection
-        if(msg.dst == this.sysId || msg.dst !in this.dests || this.dests[msg.dst].ep < 0) synchronized(this.sendBusLock) {
+        if(msg.dst == this.sysId || msg.dst !in this.dests || this.dests[msg.dst].pushSock < 0) synchronized(this.sendBusLock) {
             debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") sending("~msg.id.to!string~", "~msg.code.to!string~") to "~msg.dst.toHexString.to!string~" via "~this.busSock.to!string);
             auto pkg = msg.pack;
             r = nn_send (this.busSock, pkg.ptr, pkg.length, 0) == pkg.length;
-        } else synchronized(this.sendPubLock) {
-            debug 
-                Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") sending("~msg.id.to!string~", "~msg.code.to!string~") to "~msg.dst.toHexString.to!string~" via "~this.pubSock.to!string);
-            auto pkg = msg.dst~msg.pack;
-            r = nn_send (this.pubSock, pkg.ptr, pkg.length, 0) == pkg.length;
+        } else {
+            auto d = this.dests[msg.dst];
+            synchronized(d.pushLock) {
+                debug 
+                    Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") sending("~msg.id.to!string~", "~msg.code.to!string~") to "~msg.dst.toHexString.to!string~" via "~d.pushSock.to!string);
+                auto pkg = msg.pack;
+                r = nn_send (d.pushSock, pkg.ptr, pkg.length, 0) == pkg.length;
+            }
         }
 
         if(r) {
@@ -352,13 +347,14 @@ class NanoMsgConnector : MeshConnector {
     protected override void add(ubyte[IDLENGTH] dst, ubyte[] info) {
         import msgpack : unpack;
         auto d = info.unpack!NanoMsgDest;
-        d.ep = this.connectPub(d.subAddr);
+        d.pushLock = new Mutex;
+        d.pushSock = this.connectPush(d.subAddr);
         this.dests[dst] = d;
     }
 
     protected override void remove(ubyte[IDLENGTH] dst) {
         if(dst in this.dests) {
-            nn_shutdown(this.pubSock, this.dests[dst].ep);
+            this.close(this.dests[dst].pushSock);
             this.dests.remove(dst);
         }
     }
@@ -392,9 +388,10 @@ unittest { test.header("ipc.nanomsg.mesh: fully enabled passing of signals via i
     auto conn1 = new NanoMsgConnectorMeta;
     conn1.type = fqn!NanoMsgConnector;
     conn1.listen = "inproc://j1bus";
-    conn1.subListen = "inproc://j1sub";
-    conn1.subAddr = "inproc://j1sub";
-    conn1.threads = 2;
+    conn1.subListen = "inproc://j1pull";
+    conn1.subAddr = "inproc://j1pull";
+    /* just a dirty hack in msecs, connect should wait until socket is actually connected
+    for localhost 1 msec should be enough, for network comm it might require more */
     sm1.addMeshJunction(junctionId, "inproc://j1bus", [], conn1, 10);
 
     auto sm2 = createSpace(spc2Domain);
@@ -406,9 +403,8 @@ unittest { test.header("ipc.nanomsg.mesh: fully enabled passing of signals via i
     auto conn2 = new NanoMsgConnectorMeta;
     conn2.type = fqn!NanoMsgConnector;
     conn2.listen = "inproc://j2bus";
-    conn2.subListen = "inproc://j2sub";
-    conn2.subAddr = "inproc://j2sub";
-    conn2.threads = 2;
+    conn2.subListen = "inproc://j2pull";
+    conn2.subAddr = "inproc://j2pull";
     sm2.addMeshJunction(junctionId, "inproc://j2bus", ["inproc://j1bus"], conn2, 10);
     
     auto spc1 = proc.add(sm1);
@@ -469,8 +465,7 @@ unittest { test.header("ipc.nanomsg.mesh: fully enabled passing of signals via t
     for localhost 1 msec should be enough, for network comm it might require more */
     conn1.wait = 1;
     conn1.retry = 2;
-    conn1.threads = 1;
-    sm1.addMeshJunction(junctionId, "tcp://127.0.0.1:60000", [], conn1, 300, 300, 30);
+    sm1.addMeshJunction(junctionId, "tcp://127.0.0.1:60000", [], conn1, 100);
 
     auto sm2 = createSpace(spc2Domain);
     auto emr = sm2.addEntity("receiving");
@@ -485,8 +480,7 @@ unittest { test.header("ipc.nanomsg.mesh: fully enabled passing of signals via t
     conn2.subAddr = "tcp://127.0.0.1:60011";
     conn2.wait = 1;
     conn2.retry = 2;
-    conn2.threads = 1;
-    sm2.addMeshJunction(junctionId, "tcp://127.0.0.1:60010", ["tcp://127.0.0.1:60000"], conn2, 200, 200, 20);
+    sm2.addMeshJunction(junctionId, "tcp://127.0.0.1:60010", ["tcp://127.0.0.1:60000"], conn2, 100);
     
     auto spc1 = proc.add(sm1);
     auto spc2 = proc.add(sm2);
@@ -495,7 +489,7 @@ unittest { test.header("ipc.nanomsg.mesh: fully enabled passing of signals via t
     spc2.tick();
     spc1.tick();
 
-    Thread.sleep(300.msecs);
+    Thread.sleep(500.msecs);
 
     spc2.freeze();
     spc1.freeze();

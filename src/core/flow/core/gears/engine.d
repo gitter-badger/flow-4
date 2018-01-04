@@ -1385,6 +1385,7 @@ abstract class Junction : StateMachine!JunctionState {
     private Crypto crypto;
     private ubyte[] _auth;
 
+    final @property Processor proc() {return this._space.proc;}
     protected @property JunctionMeta meta() {return this._meta;}
     @property string space() {return this._space.meta.id;}
 

@@ -84,7 +84,7 @@ class JunctionInfo : Data { mixin _data;
     /** this side of the junction does not inform sending side of acceptance
     therefore it keeps internals secret
     (cannot allow anycast) */
-    @field bool hiding; 
+    @field bool hiding;
 
     /** send signals into junction and do not care about acceptance
     (cannot use anycast) */

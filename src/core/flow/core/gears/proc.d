@@ -15,7 +15,17 @@ private enum JobState : ubyte
     Done
 }
 
-package struct Job {
+private final class Pipe : Thread
+{
+    this(void delegate() dg)
+    {
+        super(dg);
+    }
+
+    Processor proc;
+}
+
+struct Job {
     private Job* prev;
     private Job* next;
 
@@ -32,17 +42,7 @@ package struct Job {
     private ubyte taskStatus = JobState.NotStarted;
 }
 
-private final class Pipe : Thread
-{
-    this(void delegate() dg)
-    {
-        super(dg);
-    }
-
-    Processor proc;
-}
-
-package final class Processor : StateMachine!ProcessorState {
+final class Processor : StateMachine!ProcessorState {
     private import core.sync.condition : Condition;
     private import core.sync.mutex : Mutex;
 
