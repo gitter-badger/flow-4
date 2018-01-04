@@ -180,3 +180,21 @@ class Receptor : Data { mixin _data;
     @field string tick;
     @field bool control;
 }
+
+/// information about a file
+class FileInfo : Data { mixin _data;
+    @field EntityPtr host;
+    @field string name;
+    @field long accessTime;
+    @field long modificationTime;
+    @field ulong size;
+}
+
+/// configuration of process
+class ProcessConfig : Data { mixin _data;
+    /** processes root path in filesystem
+    if not set or not accessible for
+        * posix its ~/.local/share/flow
+        * window its %APPDATA%\flow */
+    @field string fsroot;
+}

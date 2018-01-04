@@ -43,6 +43,10 @@ abstract class Tick {
     /// predicted costs of tick (default=0)
     @property size_t costs() {return 0;}
 
+    package void dispose() {
+        this.destroy;
+    }
+
     /// algorithm implementation of tick
     void run() {}
 
@@ -297,15 +301,43 @@ abstract class Tick {
         return this.entity.send(s);
     }
 
-    package void dispose() {
-        this.destroy;
+    /// checks if path exists in entities filesystem root
+    bool exists(string name) {
+        return this.entity.exists(name);
+    }
+
+    /// gets the file info of a file in entities filesystem root
+    FileInfo getInfo(string name) {
+        return this.entity.getInfo(name);
+    }
+
+    /// writes a file in entities filesystem root
+    void write(string name, const void[] buffer) {
+        this.entity.write(name, buffer);
+    }
+
+    /// appends to a file in entities filesystem root
+    void append(string name, const void[] buffer) {
+        this.entity.append(name, buffer);
+    }
+
+    /// reads a file in entities filesystem root
+    void[] read(string name, size_t upTo = size_t.max) {
+        return this.entity.read(name, upTo);
+    }
+
+    /// removes a file in entities filesystem root
+    void remove(string name) {
+        this.entity.remove(name);
     }
 }
 
 final class EntityFreezeSystemTick : Tick {}
 final class EntityStoreSystemTick : Tick {}
+final class EntityLoadSystemTick : Tick {}
 final class SpaceFreezeSystemTick : Tick {}
 final class SpaceStoreSystemTick : Tick {}
+final class SpaceLoadSystemTick : Tick {}
 
 /// gets the prefix string of ticks for logging
 string logPrefix(Tick t) {
@@ -349,6 +381,7 @@ private class Entity : StateMachine!SystemState {
     private import core.sync.mutex : Mutex;
     private import core.sync.rwmutex : ReadWriteMutex;
     private import flow.core.data;
+    private import std.datetime.systime : SysTime;
     
     Mutex _poolLock;
     Tick[][string] _pool;
@@ -531,32 +564,139 @@ private class Entity : StateMachine!SystemState {
 
     // stores actual entity meta to disk
     void store() {
-        import std.file : mkdirRecurse, write;
+        import std.file : exists, mkdirRecurse, write;
         import std.path : buildPath;
-        import std.process : environment;
+        
         bool wasFrozen;
         if(this.state != SystemState.Frozen) { // freeze if necessary
             this.freeze();
             wasFrozen = false;
         } else wasFrozen = true;
 
-        auto t = this.target;
-        t.mkdirRecurse;
-        t = t.buildPath(this.meta.ptr.id);
-        t.write(this.meta.bin);
+        if(!this.space.fsroot.exists)
+            this.space.fsroot.mkdirRecurse;
+        this.fsmeta.write(this.meta.bin);
+
+        if(!wasFrozen) // bring up if neccessary
+            this.tick();
+    }
+
+    void load() {
+        import std.file : exists, read;
+        import std.path : buildPath;
+
+        bool wasFrozen;
+        if(this.state != SystemState.Frozen) { // freeze if necessary
+            this.freeze();
+            wasFrozen = false;
+        } else wasFrozen = true;
+
+        if(!this.fsmeta.exists)
+            this.meta = this.fsmeta.read.as!(ubyte[]).unbin!EntityMeta;
 
         if(!wasFrozen) // bring up if neccessary
             this.tick();
     }
 
     void wipe() {
-        import std.file : remove, exists;
+        import std.file : rmdirRecurse, exists;
         import std.path : buildPath;
 
         this.ensureState(SystemState.Frozen);
 
-        auto t = this.target.buildPath(this.meta.ptr.id);
-        if(t.exists) t.remove;
+        if(this.fsroot.exists) this.fsroot.rmdirRecurse;
+    }
+
+    bool exists(string name) {
+        import std.array : array;
+        import std.path : buildPath, isRooted, rootName, asRelativePath;
+        import std.file : exists;
+
+        // reroot
+        if(name.isRooted)
+            name = name.asRelativePath(name.rootName).array;
+        name = this.fsroot.buildPath(name);
+
+        return name.exists;
+    }
+
+    string reroot(string name) {
+        import std.array : array;
+        import std.path : buildPath, isRooted, rootName, asRelativePath;
+
+        if(name.isRooted)
+            name = name.asRelativePath(name.rootName).array;
+        return this.fsroot.buildPath(name);
+    }
+    
+    FileInfo getInfo(string name) {
+        import std.array : array;
+        import std.path : buildPath, isRooted, rootName, asRelativePath;
+        import std.file : exists, getSize, getTimes;
+
+        if(name.isRooted)
+            name = name.asRelativePath(name.rootName).array;
+
+        auto i = new FileInfo;
+        i.name = name;
+
+        auto rooted = this.fsroot.buildPath(name);
+
+        SysTime accessTime, modificationTime;
+        rooted.getTimes(accessTime, modificationTime);
+        i.accessTime = accessTime.stdTime;
+        i.modificationTime = modificationTime.stdTime;
+
+        i.size = rooted.getSize;
+
+        return i;
+    }
+
+    void write(string name, const void[] buffer) {
+        import std.path : dirName;
+        import std.file : exists, write, mkdirRecurse;
+
+        if(!this.fsroot.exists)
+            this.fsroot.mkdirRecurse;
+        
+        name = this.reroot(name);
+        auto dir = name.dirName;
+
+        if(!dir.exists)
+            dir.mkdirRecurse;
+            
+        name.write(buffer);
+    }
+
+    void append(string name, const void[] buffer) {
+        import std.path : dirName;
+        import std.file : exists, append, mkdirRecurse;
+
+        if(!this.fsroot.exists)
+            this.fsroot.mkdirRecurse;
+
+        name = this.reroot(name);
+        auto dir = name.dirName;
+
+        if(!dir.exists)
+            dir.mkdirRecurse;
+
+        name.append(buffer);
+    }
+
+    void[] read(string name, size_t upTo = size_t.max) {
+        import std.file : exists, read;
+
+        name = this.reroot(name);
+        return name.read(upTo);
+    }
+
+    void remove(string name) {
+        import std.file : exists, remove;
+        
+        name = this.reroot(name);
+        if(name.exists)
+            name.remove();
     }
 
     void storeAsync() {
@@ -570,6 +710,17 @@ private class Entity : StateMachine!SystemState {
         }));
     }
 
+    void loadAsync() {
+        import std.parallelism : taskPool, task;
+
+        this.opLock.reader.lock();
+        taskPool.put(task((){
+            scope(exit)
+                this.opLock.reader.unlock();
+            this.load();
+        }));
+    }
+
     void spaceStoreAsync() {
         import std.parallelism : taskPool, task;
 
@@ -578,6 +729,17 @@ private class Entity : StateMachine!SystemState {
             scope(exit)
                 this.opLock.reader.unlock();
             this.space.store();
+        }));
+    }
+
+    void spaceLoadAsync() {
+        import std.parallelism : taskPool, task;
+
+        this.opLock.reader.lock();
+        taskPool.put(task((){
+            scope(exit)
+                this.opLock.reader.unlock();
+            this.space.load();
         }));
     }
 
@@ -661,26 +823,14 @@ private class Entity : StateMachine!SystemState {
         synchronized(this.execLock.writer) {}
     }
 
-    @property string target() {
-        import std.c.stdlib : getenv;
-        import std.conv : to;
-        import std.file : exists;
-        import std.path : expandTilde, buildPath;
+    @property string fsmeta() {
+        import std.path : buildPath;
+        return this.space.fsroot.buildPath(this.meta.ptr.id~".bin");
+    }
 
-        string t;
-        version(Posix) {
-            auto varT = "/var/lib/flow";
-            t = (varT.exists
-                ? varT
-                : t = "~/.local/share/flow")
-                .expandTilde;
-        }
-        version(Windows) {
-            t = getenv("APPDATA").to!string;
-        }
-        t = t.buildPath(this.space.meta.id);
-
-        return t;
+    @property string fsroot() {
+        import std.path : buildPath;
+        return this.space.fsroot.buildPath(this.meta.ptr.id);
     }
 
     void damage(Throwable thr) {
@@ -912,8 +1062,11 @@ class EntityController {
     /// tick counter of entity
     @property size_t count() {return this._entity.count;}
 
-    /// target path for entity storing
-    @property string target() {return this._entity.target;}
+    /// fil used by entity for storing metadata
+    @property string fsmeta() {return this._entity.fsmeta;}
+
+    /// filsystem directory used by entity for storing files
+    @property string fsroot() {return this._entity.fsroot;}
 
     /// deep snap of entity context
     @property Data[] aspects() {return this._entity.meta.aspects;}
@@ -933,6 +1086,41 @@ class EntityController {
     /// makes entity storing
     void store() {
         this._entity.store();
+    }
+    
+    /// makes entity storing
+    void load() {
+        this._entity.load();
+    }
+
+    /// checks if path exists in entities filesystem root
+    bool exists(string name) {
+        return this._entity.exists(name);
+    }
+
+    /// gets the times of a file in entities filesystem root
+    FileInfo getInfo(string name) {
+        return this._entity.getInfo(name);
+    }
+
+    /// writes a file in entities filesystem root
+    void write(string name, const void[] buffer) {
+        this._entity.write(name, buffer);
+    }
+
+    /// appends to a file in entities filesystem root
+    void append(string name, const void[] buffer) {
+        this._entity.append(name, buffer);
+    }
+
+    /// reads a file in entities filesystem root
+    void[] read(string name, size_t upTo = size_t.max) {
+        return this._entity.read(name, upTo);
+    }
+
+    /// removes a file in entities filesystem root
+    void remove(string name) {
+        this._entity.remove(name);
     }
     
     /// makes entity freezing
@@ -1458,6 +1646,11 @@ class Space : StateMachine!SystemState {
     private Junction[UUID] junctions;
     private Entity[string] entities;
 
+    @property string fsroot() {
+        import std.path : buildPath;
+        return this.process.cfg.fsroot.buildPath(this.meta.id);
+    }
+
     private this(Process p, SpaceMeta m) {
         this.meta = m;
         this.process = p;
@@ -1596,6 +1789,24 @@ class Space : StateMachine!SystemState {
             
             foreach(e; this.entities.values)
                 e.store();
+        }
+    }
+
+    /// makes all of spaces content loading
+    void load() {
+        synchronized(this.lock.reader) {
+            Entity[] frozen;
+            foreach_reverse(e; this.entities.values)
+                if(e.state == SystemState.Frozen) {
+                    e.freeze();
+                    frozen ~= e;
+                }
+
+            scope(exit) foreach_reverse(e; frozen)
+                e.tick();
+            
+            foreach(e; this.entities.values)
+                e.load();
         }
     }
 
@@ -1814,13 +2025,44 @@ class Space : StateMachine!SystemState {
 whatever happens on this level, it has to happen in main thread or an exception occurs */
 class Process {  
     private import core.sync.rwmutex : ReadWriteMutex;
-      
+    
     private ReadWriteMutex lock;
     private Space[string] spaces;
 
+    private ProcessConfig cfg;
+
     /// ctor
-    this() {
+    this(ProcessConfig cfg = null) {
         this.lock = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_WRITERS);
+        this.config(cfg);
+    }
+/** processes root path in filesystem
+    if not set for
+        * linux its ~/.local/share/flow
+        * window its %APPDATA%\flow */
+    private void config(ProcessConfig cfg) {
+        import std.c.stdlib : getenv;
+        import std.conv : to;
+        import std.file : exists;
+        import std.path : expandTilde, buildPath;
+
+        if(cfg is null)
+            cfg = new ProcessConfig;
+
+        if(
+            cfg.fsroot == string.init ||
+            !cfg.fsroot.exists/* ||
+            TODO check for write permissions */
+        ) {
+            version(Posix) {
+                cfg.fsroot = "~".expandTilde.buildPath(".local", "share", "flow");
+            }
+            version(Windows) {
+                cfg.fsroot = getenv("APPDATA").to!string.buildPath("flow");
+            }
+        }
+
+        this.cfg = cfg;
     }
 
     void dispose() {

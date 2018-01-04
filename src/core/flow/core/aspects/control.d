@@ -297,7 +297,8 @@ class RefusedEntityMetricsInfo : Unicast { mixin _data;
 class EntityMetricsInfo : Unicast { mixin _data;
     @field SystemState state;
     @field size_t count;
-    @field string target;
+    @field string fsmeta;
+    @field string fsroot;
     @field Damage[] damages;
 }
 
@@ -314,7 +315,8 @@ class EntityMetricsTick : Tick {
                     auto i = new EntityMetricsInfo;
                     i.state = ctrl.state;
                     i.count = ctrl.count;
-                    i.target = ctrl.target;
+                    i.fsmeta = ctrl.fsmeta;
+                    i.fsroot = ctrl.fsroot;
                     i.damages = ctrl.damages;
                     this.send(i, s.src);
                 } catch(TickException exc) {
@@ -603,13 +605,13 @@ unittest { test.header("aspects.control: store space; trusted sender");
     rem.addTick(fqn!TestControllerTick);
 
     auto spc = proc.add(sm);
-    auto target = spc.get("requesting").target.buildPath("requesting");
-    if(target.exists) target.remove;
+    auto fsmeta = spc.get("requesting").fsmeta;
+    if(fsmeta.exists) fsmeta.remove;
     spc.tick();
 
     Thread.sleep(50.msecs);
 
-    assert(target.exists, "space wasn't stored");
+    assert(fsmeta.exists, "space wasn't stored");
 test.footer(); }
 
 unittest { test.header("aspects.control: store space; untrusted sender");
@@ -635,13 +637,13 @@ unittest { test.header("aspects.control: store space; untrusted sender");
     rem.addTick(fqn!TestControllerTick);
 
     auto spc = proc.add(sm);
-    auto target = spc.get("requesting").target.buildPath("requesting");
-    if(target.exists) target.remove;
+    auto fsmeta = spc.get("requesting").fsmeta;
+    if(fsmeta.exists) fsmeta.remove;
     spc.tick();
 
     Thread.sleep(50.msecs);
 
-    assert(!target.exists, "space stored even requester wasn't trusted");
+    assert(!fsmeta.exists, "space stored even requester wasn't trusted");
 test.footer(); }
 
 unittest { test.header("aspects.control: spawn entity; trusted sender");
@@ -1155,8 +1157,8 @@ unittest { test.header("aspects.control: entity store; trusted sender");
     rem.addTick(fqn!TestControllerTick);
 
     auto spc = proc.add(sm);
-    auto target = spc.get("storing").target.buildPath("storing");
-    if(target.exists) target.remove;
+    auto fsmeta = spc.get("storing").fsmeta;
+    if(fsmeta.exists) fsmeta.remove;
     spc.tick();
 
     Thread.sleep(50.msecs);
@@ -1164,7 +1166,7 @@ unittest { test.header("aspects.control: entity store; trusted sender");
     auto ra = spc.get("requesting").aspects[0].as!TestControllerAspect;
     assert(ra.response.as!RefusedEntityStoreInfo is null, "store was refused");
     assert(ra.response.as!EntityStoredInfo !is null, "store wasn't confirmed");
-    assert(target.exists, "entity wasn't stored");
+    assert(fsmeta.exists, "entity wasn't stored");
 test.footer(); }
 
 unittest { test.header("aspects.control: entity store; untrusted sender");
@@ -1194,8 +1196,8 @@ unittest { test.header("aspects.control: entity store; untrusted sender");
     rem.addTick(fqn!TestControllerTick);
 
     auto spc = proc.add(sm);
-    auto target = spc.get("storing").target.buildPath("storing");
-    if(target.exists) target.remove;
+    auto fsmeta = spc.get("storing").fsmeta;
+    if(fsmeta.exists) fsmeta.remove;
     spc.tick();
 
     Thread.sleep(50.msecs);
@@ -1203,7 +1205,7 @@ unittest { test.header("aspects.control: entity store; untrusted sender");
     auto ra = spc.get("requesting").aspects[0].as!TestControllerAspect;
     assert(ra.response.as!EntityStoredInfo is null, "freeze was confirmed");
     assert(ra.response.as!RefusedEntityStoreInfo !is null, "freeze wasn't refused");
-    assert(!target.exists, "entity was stored");
+    assert(!fsmeta.exists, "entity was stored");
 test.footer(); }
 
 unittest { test.header("aspects.control: entity snap; trusted sender");

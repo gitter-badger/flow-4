@@ -61,13 +61,13 @@ unittest { test.header("aspects.store: in control");
     em.addTick(fqn!UnicastSendingTestTick);
 
     auto spc = proc.add(sm);
-    auto target = spc.get("controlling").target.buildPath("controlling");
-    if(target.exists) target.remove;
+    auto fsmeta = spc.get("controlling").fsmeta;
+    if(fsmeta.exists) fsmeta.remove;
     spc.tick();
 
     Thread.sleep(50.msecs);
 
-    assert(target.exists, "entity wasn't stored");
+    assert(fsmeta.exists, "entity wasn't stored");
 
     spc.freeze();
 test.footer(); }
@@ -97,13 +97,13 @@ unittest { test.header("aspects.store: not in control");
     em.addTick(fqn!UnicastSendingTestTick);
 
     auto spc = proc.add(sm);
-    auto target = spc.get("controlling").target.buildPath("controlling");
-    if(target.exists) target.remove;
+    auto fsmeta = spc.get("controlling").fsmeta;
+    if(fsmeta.exists) fsmeta.remove;
     spc.tick();
 
     Thread.sleep(50.msecs);
 
-    assert(!target.exists, "entity stored even tick wasn't in control");
+    assert(!fsmeta.exists, "entity stored even tick wasn't in control");
 
     spc.freeze();
 test.footer(); }
