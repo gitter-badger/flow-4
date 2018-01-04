@@ -42,7 +42,6 @@ unittest { test.header("aspects.store: in control");
     import core.thread;
     import flow.core.util;
     import std.file : exists, remove;
-    import std.path : buildPath;
 
     auto proc = new Process;
     scope(exit)
@@ -76,7 +75,6 @@ unittest { test.header("aspects.store: not in control");
     import core.thread;
     import flow.core.util;
     import std.file : exists, remove;
-    import std.path : buildPath;
 
     auto proc = new Process;
     scope(exit)

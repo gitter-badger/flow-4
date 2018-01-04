@@ -135,7 +135,7 @@ abstract class Tick {
         import std.datetime.systime : Clock;
 
         auto stdTime = Clock.currStdTime;
-        if(this.meta.control || (tick != fqn!EntityFreezeSystemTick && tick != fqn!EntityStoreSystemTick)) {
+        if(this.meta.control || (tick != fqn!EntityFreezeSystemTick && tick != fqn!EntityStoreSystemTick && tick != fqn!EntityHibernateSystemTick)) {
             auto m = tick.createTickMeta(this.meta.info.group);
 
             // if this tick has control, pass it
@@ -334,6 +334,7 @@ abstract class Tick {
 
 final class EntityFreezeSystemTick : Tick {}
 final class EntityStoreSystemTick : Tick {}
+final class EntityHibernateSystemTick : Tick {}
 final class EntityLoadSystemTick : Tick {}
 final class SpaceFreezeSystemTick : Tick {}
 final class SpaceStoreSystemTick : Tick {}
@@ -480,6 +481,12 @@ private class Entity : StateMachine!SystemState {
                                 this.storeAsync(); // async for avoiding deadlock
                             this.execLock.reader.unlock();
                             break;
+                        case fqn!EntityHibernateSystemTick:
+                            auto control = nm.control;
+                            if(control)
+                                this.hibernateAsync(); // async for avoiding deadlock
+                            this.execLock.reader.unlock();
+                            break;
                         case fqn!SpaceFreezeSystemTick:
                             auto control = nm.control;
                             if(control)
@@ -564,47 +571,35 @@ private class Entity : StateMachine!SystemState {
 
     // stores actual entity meta to disk
     void store() {
-        import std.file : exists, mkdirRecurse, write;
-        import std.path : buildPath;
-        
-        bool wasFrozen;
-        if(this.state != SystemState.Frozen) { // freeze if necessary
-            this.freeze();
-            wasFrozen = false;
-        } else wasFrozen = true;
+        this.space.store(this.meta.ptr.id);
+    }
 
-        if(!this.space.fsroot.exists)
-            this.space.fsroot.mkdirRecurse;
-        this.fsmeta.write(this.meta.bin);
+    void storeAsync() {
+        import std.parallelism : taskPool, task;
 
-        if(!wasFrozen) // bring up if neccessary
-            this.tick();
+        this.opLock.reader.lock();
+        taskPool.put(task((){
+            scope(exit)
+                this.opLock.reader.unlock();
+            this.store();
+        }));
+    }
+
+    /// meakes entity freeze
+    void hibernate() {
+        this.space.hibernate(this.meta.ptr.id);
+    }
+
+    void hibernateAsync() {
+        import std.parallelism : taskPool, task;
+
+        taskPool.put(task((){
+            this.space.hibernate(this.meta.ptr.id);
+        }));
     }
 
     void load() {
-        import std.file : exists, read;
-        import std.path : buildPath;
-
-        bool wasFrozen;
-        if(this.state != SystemState.Frozen) { // freeze if necessary
-            this.freeze();
-            wasFrozen = false;
-        } else wasFrozen = true;
-
-        if(!this.fsmeta.exists)
-            this.meta = this.fsmeta.read.as!(ubyte[]).unbin!EntityMeta;
-
-        if(!wasFrozen) // bring up if neccessary
-            this.tick();
-    }
-
-    void wipe() {
-        import std.file : rmdirRecurse, exists;
-        import std.path : buildPath;
-
-        this.ensureState(SystemState.Frozen);
-
-        if(this.fsroot.exists) this.fsroot.rmdirRecurse;
+        this.space.load(this.meta.ptr.id);
     }
 
     bool exists(string name) {
@@ -697,17 +692,6 @@ private class Entity : StateMachine!SystemState {
         name = this.reroot(name);
         if(name.exists)
             name.remove();
-    }
-
-    void storeAsync() {
-        import std.parallelism : taskPool, task;
-
-        this.opLock.reader.lock();
-        taskPool.put(task((){
-            scope(exit)
-                this.opLock.reader.unlock();
-            this.store();
-        }));
     }
 
     void loadAsync() {
@@ -824,13 +808,11 @@ private class Entity : StateMachine!SystemState {
     }
 
     @property string fsmeta() {
-        import std.path : buildPath;
-        return this.space.fsroot.buildPath(this.meta.ptr.id~".bin");
+        return this.space.getMetaPath(this.meta.ptr.id);
     }
 
     @property string fsroot() {
-        import std.path : buildPath;
-        return this.space.fsroot.buildPath(this.meta.ptr.id);
+        return this.space.getRootPath(this.meta.ptr.id);
     }
 
     void damage(Throwable thr) {
@@ -1092,40 +1074,15 @@ class EntityController {
     void load() {
         this._entity.load();
     }
-
-    /// checks if path exists in entities filesystem root
-    bool exists(string name) {
-        return this._entity.exists(name);
-    }
-
-    /// gets the times of a file in entities filesystem root
-    FileInfo getInfo(string name) {
-        return this._entity.getInfo(name);
-    }
-
-    /// writes a file in entities filesystem root
-    void write(string name, const void[] buffer) {
-        this._entity.write(name, buffer);
-    }
-
-    /// appends to a file in entities filesystem root
-    void append(string name, const void[] buffer) {
-        this._entity.append(name, buffer);
-    }
-
-    /// reads a file in entities filesystem root
-    void[] read(string name, size_t upTo = size_t.max) {
-        return this._entity.read(name, upTo);
-    }
-
-    /// removes a file in entities filesystem root
-    void remove(string name) {
-        this._entity.remove(name);
-    }
     
     /// makes entity freezing
     void freeze() {
         this._entity.freeze();
+    }
+    
+    /// makes entity hibernating
+    void hibernate() {
+        this._entity.hibernate();
     }
 
     /// makes entity ticking
@@ -1249,6 +1206,36 @@ class EntityController {
             s.group = group == UUID.init ? randomUUID : group;
 
         return this._entity.send(s);
+    }
+
+    /// checks if path exists in entities filesystem root
+    bool exists(string name) {
+        return this._entity.exists(name);
+    }
+
+    /// gets the times of a file in entities filesystem root
+    FileInfo getInfo(string name) {
+        return this._entity.getInfo(name);
+    }
+
+    /// writes a file in entities filesystem root
+    void write(string name, const void[] buffer) {
+        this._entity.write(name, buffer);
+    }
+
+    /// appends to a file in entities filesystem root
+    void append(string name, const void[] buffer) {
+        this._entity.append(name, buffer);
+    }
+
+    /// reads a file in entities filesystem root
+    void[] read(string name, size_t upTo = size_t.max) {
+        return this._entity.read(name, upTo);
+    }
+
+    /// removes a file in entities filesystem root
+    void remove(string name) {
+        this._entity.remove(name);
     }
 }
 
@@ -1792,6 +1779,57 @@ class Space : StateMachine!SystemState {
         }
     }
 
+    private bool knows(string name) {
+        import std.file : exists;
+
+        return (name in this.entities || this.getMetaPath(name).exists) ? true : false;
+    }
+
+    string getMetaPath(string name) {
+        import std.path : buildPath;
+        return this.fsroot.buildPath(name~".bin");
+    }
+
+    string getRootPath(string name) {
+        import std.path : buildPath;
+        return this.fsroot.buildPath(name);
+    }
+
+    void store(string name) {
+        import flow.core.gears.error : SpaceException;
+        synchronized(this.lock.reader)
+            if(name in this.entities)
+                this.store(this.entities[name]);
+            else throw new SpaceException("entity with addr \""~name~"\" is not existing");
+    }
+
+    private void store(Entity e) {
+        import std.file : exists, mkdirRecurse, write;
+
+        bool wasFrozen;
+        if(e.state != SystemState.Frozen) { // freeze if necessary
+            e.freeze();
+            wasFrozen = false;
+        } else wasFrozen = true;
+
+        if(!this.fsroot.exists)
+            this.fsroot.mkdirRecurse;
+        this.getMetaPath(e.meta.ptr.id).write(e.meta.bin);
+
+        if(!wasFrozen) // bring up if neccessary
+            e.tick();
+    }
+
+    private void wipe(string name) {
+        import std.file : remove, rmdirRecurse, exists;
+        import std.path : buildPath;
+
+        auto mp = this.getMetaPath(name);
+        auto rp = this.getRootPath(name);
+        if(rp.exists) mp.remove;
+        if(rp.exists) rp.rmdirRecurse;
+    }
+
     /// makes all of spaces content loading
     void load() {
         synchronized(this.lock.reader) {
@@ -1805,13 +1843,76 @@ class Space : StateMachine!SystemState {
             scope(exit) foreach_reverse(e; frozen)
                 e.tick();
             
-            foreach(e; this.entities.values)
-                e.load();
+            foreach(en; this.entities.keys)
+                this.load(en);
         }
     }
 
-    EntityController get(EntityPtr ptr) {
-        return this.get(ptr.id);
+    /// loads an entities metadata or wakes it up
+    bool load(string name) {
+        import std.file : exists, read;
+
+        synchronized(this.lock.writer) {
+            auto mp = this.getMetaPath(name);
+            if(mp.exists) {
+                auto m = mp.read.as!(ubyte[]).unbin!EntityMeta;
+                if(name in this.entities)
+                    this.load(this.entities[name], m);
+                else {
+                    m.ptr.id = name;
+                    m.ptr.space = this.meta.id;
+                    this.wake(m);
+                }
+
+                return true;
+            } else
+                // when its just a load operation return true if just no stored state exists
+                return (name in this.entities) ? true : false;
+        }
+    }
+
+    private void load(Entity e, EntityMeta m) {
+        bool wasFrozen;
+        if(e.state != SystemState.Frozen) { // freeze if necessary
+            e.freeze();
+            wasFrozen = false;
+        } else wasFrozen = true;
+
+        e.meta = m;
+
+        if(!wasFrozen) // bring up if neccessary
+            e.tick();
+    }
+
+    private void wake(EntityMeta m) {
+        this.meta.entities ~= m;
+        Entity e = new Entity(this, m);
+        this.entities[m.ptr.id] = e;
+        e.tick();
+    }
+
+    /// hibernates an entity
+    void hibernate(string name) {
+        import core.memory : GC;
+        import flow.core.gears.error : SpaceException;
+        import std.algorithm.mutation : remove;
+
+        synchronized(this.lock.writer) {
+            // unload it
+            if(name in this.entities) {
+                auto e = this.entities[name];
+                if(e.state != SystemState.Frozen) // freeze if necessary
+                    e.freeze();
+
+                // sotre it
+                this.store(e);
+
+                foreach_reverse(i, m; this.meta.entities)
+                    this.meta.entities.remove(i);
+                e.freeze(); e.dispose(); GC.free(&e);
+                this.entities.remove(name);
+            } else throw new SpaceException("entity with addr \""~name~"\" is not existing");
+        }
     }
 
     /// gets a controller for an entity contained in space (null if not existing)
@@ -1825,7 +1926,7 @@ class Space : StateMachine!SystemState {
         import flow.core.gears.error : SpaceException;
 
         synchronized(this.lock.writer) {
-            if(m.ptr.id in this.entities)
+            if(this.knows(m.ptr.id))
                 throw new SpaceException("entity with addr \""~m.ptr.addr~"\" is already existing");
             else {
                 // ensure entity belonging to this space
@@ -1840,16 +1941,25 @@ class Space : StateMachine!SystemState {
     }
 
     /// kills an existing entity in space
-    void kill(string en) {
+    void kill(string name) {
         import core.memory : GC;
         import flow.core.gears.error : SpaceException;
+        import std.algorithm.mutation : remove;
 
         synchronized(this.lock.writer) {
-            if(en in this.entities) {
-                auto e = this.entities[en];
-                e.freeze(); e.wipe(); e.dispose(); GC.free(&e);
-                this.entities.remove(en);
-            } else throw new SpaceException("entity with addr \""~en~"\" is not existing");
+            if(this.knows(name)) {
+                if(name in this.entities) {
+                    foreach_reverse(i, m; this.meta.entities)
+                        if(m.ptr.id == name) {
+                            this.meta.entities.remove(i);
+                            break;
+                        }
+                    auto e = this.entities[name];
+                    e.freeze(); e.dispose(); GC.free(&e);
+                    this.entities.remove(name);
+                }
+                this.wipe(name);
+            } else throw new SpaceException("entity with addr \""~name~"\" is not existing");
         }
     }
 
@@ -1909,11 +2019,14 @@ class Space : StateMachine!SystemState {
         synchronized(this.lock.reader)
             if(this.state == SystemState.Ticking)
                 if(s.dst.space == this.meta.id) {
-                    foreach(e; this.entities.values) {
-                        if(e.meta.level >= level) { // only accept if entities level is equal or higher the one of the junction
-                            if(e.meta.ptr == s.dst)
-                                return e.receipt(s);
-                        }
+                    if(this.knows(s.dst.id)) {
+                        if(s.dst.id !in this.entities)
+                            // wake it up
+                            assert(this.load(s.dst.id), "can't be, known was checked before");
+                        
+                        auto e = this.entities[s.dst.id];
+                        if(e.meta.level >= level)
+                            return e.receipt(s);
                     }
                 }
         
@@ -2473,9 +2586,9 @@ unittest { test.header("gears.engine: first level error handling");
     Thread.sleep(10.msecs); // exceptionhandling takes quite a while
     Log.logLevel = origLL;
 
-    assert(spc.get(em.ptr).state == SystemState.Frozen, "entity isn't frozen");
-    assert(!spc.get(em.ptr).damages.empty, "entity isn't damaged");
-    assert(spc.get(em.ptr).damages.length == 1, "entity has wrong amount of damages");
+    assert(spc.get(em.ptr.id).state == SystemState.Frozen, "entity isn't frozen");
+    assert(!spc.get(em.ptr.id).damages.empty, "entity isn't damaged");
+    assert(spc.get(em.ptr.id).damages.length == 1, "entity has wrong amount of damages");
 test.footer(); }
 
 unittest { test.header("gears.engine: second level -> damage error handling");
@@ -2497,6 +2610,7 @@ unittest { test.header("gears.engine: second level -> damage error handling");
 
     auto spc = proc.add(sm);
 
+    // do not trigger test runner by writing error messages to stdout
     auto origLL = Log.logLevel;
     Log.logLevel = LL.Message;
     spc.tick();
@@ -2504,9 +2618,9 @@ unittest { test.header("gears.engine: second level -> damage error handling");
     Thread.sleep(10.msecs); // exceptionhandling takes quite a while
     Log.logLevel = origLL;
 
-    assert(spc.get(em.ptr).state == SystemState.Frozen, "entity isn't frozen");
-    assert(!spc.get(em.ptr).damages.empty, "entity isn't damaged");
-    assert(spc.get(em.ptr).damages.length == 1, "entity has wrong amount of damages");
+    assert(spc.get(em.ptr.id).state == SystemState.Frozen, "entity isn't frozen");
+    assert(!spc.get(em.ptr.id).damages.empty, "entity isn't damaged");
+    assert(spc.get(em.ptr.id).damages.length == 1, "entity has wrong amount of damages");
 test.footer(); }
 
 unittest { test.header("gears.engine: delayed next");
