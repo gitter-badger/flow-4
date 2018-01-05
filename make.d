@@ -1,5 +1,6 @@
 import core.stdc.stdlib;
-import std.file, std.path, std.json, std.compiler;
+import std.compiler;
+import std.json;
 
 /* CMAKE WINDOWS HACKS
 set(CompilerFlags
@@ -132,7 +133,9 @@ abstract class Build {
     }
 
     final bool check(string f) {
-        import std.datetime.systime;
+        import std.datetime.systime : SysTime;
+        import std.file : getTimes;
+        import std.path : buildPath, exists;
 
         if(!f.exists) return false;
 
@@ -150,18 +153,24 @@ abstract class Build {
         return true;
     }
 
-    final @property string srcRoot() {return this.main.buildPath(this.root);}
+    final @property string srcRoot() {
+        import std.path : buildPath;
+        return this.main.buildPath(this.root);
+    }
 
     final @property string[] src() {
-        import std.range : array;
         import std.algorithm.iteration : map;
+        import std.file : dirEntries, SpanMode;
+        import std.path : buildPath, relativePath;
+        import std.range : array;
+
         auto limitDir = this.srcRoot.buildPath(this.limit);
         return limitDir.dirEntries("*.d", SpanMode.depth).map!(x => x.relativePath(this.srcRoot)).array;
     }
 
     final bool checkDeps() {
         foreach(d; this.deps) {
-            assert(d in Lib.reg, "!!! dependecy \""~d~"\" of \""~this.name~"\" not found");
+            assert(d in Lib.reg, "!!! dependency \""~d~"\" of \""~this.name~"\" not found");
             
             if(!Lib.reg[d].clean)
                 return false;
@@ -172,7 +181,7 @@ abstract class Build {
 
     final void buildDeps() {
         foreach(d; this.deps) {
-            assert(d in Lib.reg, "!!! dependecy \""~d~"\" of \""~this.name~"\" not found");
+            assert(d in Lib.reg, "!!! dependency \""~d~"\" of \""~this.name~"\" not found");
             
             if(!Lib.reg[d].done)
                 Lib.reg[d].doMake();
@@ -223,13 +232,17 @@ abstract class Build {
         import std.conv : to;
         import std.datetime.stopwatch : benchmark;
         import std.stdio : stdin, stdout, stderr, writeln;
+        import std.path : buildPath;
         import std.process : spawnProcess, wait, Config;
 
         auto f = {
             string[string] env;
             env["LD_LIBRARY_PATH"] = rootDir.buildPath("lib");
             auto tstPid = spawnProcess([exec], stdin, stdout, stderr, env, Config.none, rootDir);
-            assert(tstPid.wait() == 0, "!!! execution error");
+            if(tstPid.wait() != 0) {
+                writeln("!!! execution error");
+                exit(-1);
+            }
         };
 
         auto b = benchmark!(f)(1);
@@ -269,18 +282,24 @@ final class Lib : Build {
     }
 
     @property string of() {
+        import std.path : buildPath;
+
         return rootDir.buildPath(
             "lib", "lib"~this.name~(this.isShared ? sharedExt : staticExt)
         );
     }
 
     @property string tof() {
+        import std.path : buildPath;
+
         return rootDir.buildPath(
             "test", "lib", "lib"~this.name~staticExt
         );
     }
 
     @property string tbof() {
+        import std.path : buildPath;
+
         return rootDir.buildPath(
             "test", this.name~binExt
         );
@@ -297,6 +316,8 @@ final class Lib : Build {
     }
 
     version(Posix) string[] getDepLflags(bool test = false) {
+        import std.path : baseName;
+
         string[] flags;
         foreach(d; this.deps)
             flags ~= Lib.reg[d].getDepLflags(test);
@@ -310,6 +331,8 @@ final class Lib : Build {
     }
 
     version(Windows) string[] getDepLflags(bool test = false) {
+        import std.path : baseName;
+
         string[] flags;
         foreach(d; this.deps)
             flags ~= Lib.reg[d].getDepLflags();
@@ -323,6 +346,8 @@ final class Lib : Build {
     }
 
     string[] getCflags(bool bin = false, bool test = false) {
+        import std.path : buildPath;
+
         string[] flags = cast(string[])defCflags;
 
         if(this.genIfc)
@@ -338,6 +363,8 @@ final class Lib : Build {
     }
 
     string[] getLflags(bool bin = false, bool test = false) {
+        import std.path : buildPath;
+
         string[] flags = cast(string[])defLflags;
 
         flags ~= this.getLibLflags();
@@ -407,16 +434,25 @@ final class Bin : Build {
             if(!b.done)
                 b.doMake();
     }
+
+    string _of;
     
-    this(string n, string m, string j) {
-        super(n, m, j);
+    this(string n, string m, string js) {
+        super(n, m, js);
+
+        auto j = parseJSON(js);
+        this._of = j.get!(string)("of");
     }
 
     @property string of() {
-        return rootDir.buildPath("bin", "flow-"~this.name~binExt);
+        import std.path : buildPath;
+
+        return rootDir.buildPath("bin", this._of == string.init ? "flow-"~this.name~binExt : this._of);
     }
 
     string[] getCflags() {
+        import std.path : buildPath;
+        
         string[] flags = cast(string[])defCflags;
 
         foreach(d; this.deps)
@@ -426,6 +462,8 @@ final class Bin : Build {
     }
 
     string[] getLflags() {
+        import std.path : buildPath;
+
         string[] flags = cast(string[])defLflags;
 
         flags ~= this.getLibLflags();
@@ -468,17 +506,21 @@ final class Bin : Build {
 }
 
 void loadLibs() {
+    import std.file : dirEntries, SpanMode, readText;
+    import std.path : buildPath, baseName, dirName;
     import std.stdio : writeln;
 
     auto jsons = rootDir.dirEntries("*.lib.json", SpanMode.depth);
     foreach(j; jsons) {
         auto name = j.baseName(".lib.json");
-        writeln("*** adding library ", name);
+        writeln("::: adding library ", name);
         Lib.reg[name] = new Lib(name, j.dirName.buildPath(name), false, false, false, false, j.readText);
     }
 }
 
 void loadCore() {
+    import std.file : dirEntries, SpanMode, readText;
+    import std.path : buildPath, baseName, dirName;
     import std.range : front, empty, array;
     import std.stdio : writeln;
 
@@ -487,83 +529,210 @@ void loadCore() {
         if(jsons.length > 1) assert("!!! there cannot be multiple core definitions");
         auto j = jsons.front;
         auto name = "core";
-        writeln("*** adding flow core");
+        writeln("::: adding flow core");
         Lib.reg[name] = new Lib(name, j.dirName.buildPath(name), true, true, true, true, j.readText);
     }
 }
 
 void loadExts() {
+    import std.file : dirEntries, SpanMode, readText;
+    import std.path : buildPath, baseName, dirName;
     import std.stdio : writeln;
 
     auto jsons = rootDir.dirEntries("*.ext.json", SpanMode.depth);
     foreach(j; jsons) {
         auto name = j.baseName(".ext.json");
-        writeln("*** adding extension ", name);
+        writeln("::: adding extension ", name);
         Lib.reg[name] = new Lib(name, j.dirName.buildPath(name), true, true, true, true, j.readText);
     }
 }
 
 void loadBins() {
+    import std.file : dirEntries, SpanMode, readText;
+    import std.path : buildPath, baseName, dirName;
     import std.stdio : writeln;
 
     auto jsons = rootDir.dirEntries("*.bin.json", SpanMode.depth);
     foreach(j; jsons) {
         auto name = j.baseName(".bin.json");
-        writeln("*** adding binary ", name);
+        writeln("::: adding binary ", name);
         Bin.reg[name] = new Bin(name, j.dirName.buildPath(name), j.readText);
     }
 }
 
 void loadDocs() {
+    import std.file : dirEntries, SpanMode, readText;
+    import std.path : buildPath, baseName, dirName;
     import std.stdio : writeln;
 
     auto jsons = rootDir.dirEntries("*.doc.json", SpanMode.depth);
     foreach(j; jsons) {
         auto name = j.baseName(".doc.json");
-        writeln("*** adding doc ", name);
+        writeln("::: adding doc ", name);
         Bin.reg[name] = new Bin(name, j.dirName.buildPath(name), j.readText);
     }
 }
 
-int main(string[] args) {
+void clean() {
+    import std.file : rmdirRecurse, exists;
+    import std.path : buildPath;
     import std.stdio : writeln;
 
+    writeln("*** cleaning up");
+    if(rootDir.buildPath("ifc").exists)
+        rootDir.buildPath("ifc").rmdirRecurse;
+
+    if(rootDir.buildPath("lib").exists)
+        rootDir.buildPath("lib").rmdirRecurse;
+
+    if(rootDir.buildPath("bin").exists)
+        rootDir.buildPath("bin").rmdirRecurse;
+
+    if(rootDir.buildPath("test").exists)
+        rootDir.buildPath("test").rmdirRecurse;
+}
+
+void build() {
+    import std.file : mkdirRecurse;
+    import std.path : buildPath, exists;
+    import std.stdio : writeln;
+
+    writeln("*** loading packages");
+    loadLibs();
+    loadCore();
+    loadExts();
+    loadBins();
+    loadDocs();
+
     writeln("*** compiling using "~DC);
+    rootDir.buildPath("ifc").mkdirRecurse;
+    rootDir.buildPath("lib").mkdirRecurse;
+    rootDir.buildPath("bin").mkdirRecurse;
+    rootDir.buildPath("test").mkdirRecurse;
+    rootDir.buildPath("test", "lib").mkdirRecurse;
+    
+    Lib.make();
+    Bin.make();
+}
+
+version(Posix) void install() {
+    import std.file : copy, exists, remove, Yes;
+    import std.path : buildPath, baseName;
+    import std.process : environment;
+    import std.stdio : writeln;
+
+    auto user = environment["USER"];
+    
+    if(user != "root") {
+        writeln("!!! cannot install without beeing root");
+        exit(-1);
+    }
+
+    writeln("*** loading packages");
+    loadLibs();
+    loadCore();
+    loadExts();
+    loadBins();
+
+    auto systemLibPath = "/".buildPath("usr", "lib");
+    auto systemBinPath = "/".buildPath("usr", "bin");
+
+    writeln("*** installing libraries");
+    foreach(n, l; Lib.reg)
+        if(l.isShared) {
+            auto t = systemLibPath.buildPath(l.of.baseName);
+            writeln("::: ", l.of, " >>> ", t);
+            if(t.exists) t.remove();
+            l.of.copy(t, Yes.preserveAttributes);
+        }
+
+    writeln("*** installing binaries");
+    foreach(n, b; Bin.reg) {
+        auto t = systemBinPath.buildPath(b.of.baseName);
+        writeln("::: ", b.of, " >>> ", t);
+        if(t.exists) t.remove();
+        b.of.copy(t, Yes.preserveAttributes);
+    }
+}
+
+version(Posix) void uninstall() {
+    import std.file : remove, exists;
+    import std.path : buildPath, baseName;
+    import std.process : environment;
+    import std.stdio : writeln;
+
+    auto user = environment["USER"];
+    
+    if(user != "root") {
+        writeln("!!! cannot uninstall without beeing root");
+        exit(-1);
+    }
+
+    writeln("*** loading packages");
+    loadLibs();
+    loadCore();
+    loadExts();
+    loadBins();
+
+    auto systemLibPath = "/".buildPath("usr", "lib");
+    auto systemBinPath = "/".buildPath("usr", "bin");
+
+    writeln("*** uninstalling libraries");
+    foreach(n, l; Lib.reg)
+        if(l.isShared) {
+            auto f = systemLibPath.buildPath(l.of.baseName);
+            if(f.exists) {
+                writeln("::: removing ", f);
+                f.remove();
+            }
+        }
+
+    writeln("*** uninstalling binaries");
+    foreach(n, b; Bin.reg) {
+        auto f = systemBinPath.buildPath(b.of.baseName);
+        if(f.exists) {
+            writeln("::: removing ", f);
+            f.remove();
+        }
+    }
+}
+
+version(Windows) void install() {
+    import std.c.stdlib : getenv;
+}
+
+version(Windows) void uninstall() {
+    import std.c.stdlib : getenv;
+}
+
+void main(string[] args) {
+    import std.path : getcwd;
+    import std.stdio : writeln;
 
     rootDir = getcwd;
 
     auto cmd = args.length > 1 ? args[1] : "build";
-
-    if(cmd == "rebuild" || cmd == "clean") {
-        if(rootDir.buildPath("ifc").exists)
-            rootDir.buildPath("ifc").rmdirRecurse;
-
-        if(rootDir.buildPath("lib").exists)
-            rootDir.buildPath("lib").rmdirRecurse;
-
-        if(rootDir.buildPath("bin").exists)
-            rootDir.buildPath("bin").rmdirRecurse;
-
-        if(rootDir.buildPath("test").exists)
-            rootDir.buildPath("test").rmdirRecurse;
+    switch(cmd) {
+        case "build":
+            build();
+            break;
+        case "rebuild":
+            clean();
+            build();
+            break;
+        case "clean":
+            clean();
+            break;
+        case "install":
+            install();
+            break;
+        case "uninstall":
+            uninstall();
+            break;
+        default:
+            writeln("!!! argument \"", cmd, "\" unknown");
+            exit(-1);
     }
 
-    if(cmd == "build" || cmd == "rebuild") {
-        rootDir.buildPath("ifc").mkdirRecurse;
-        rootDir.buildPath("lib").mkdirRecurse;
-        rootDir.buildPath("bin").mkdirRecurse;
-        rootDir.buildPath("test").mkdirRecurse;
-        rootDir.buildPath("test", "lib").mkdirRecurse;
-
-        loadLibs();
-        loadCore();
-        loadExts();
-        loadBins();
-        loadDocs();
-        
-        Lib.make();
-        Bin.make();
-    }
-
-    return 0;
+    exit(0);
 }

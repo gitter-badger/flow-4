@@ -213,7 +213,7 @@ if(is(T == std.datetime.Duration)) {
 private JSONValue jsonValue(T)(T data)
 if(is(T : Data)) {
     import flow.core.data.engine : PropertyInfo;
-    import flow.core.util.templates : as;
+    import flow.core.util.traits : as;
     import std.json : JSONValue;
 
     JSONValue c;
@@ -269,7 +269,7 @@ Data createDataFromJson(string str, JsonSerializer serializer = JsonSerializer.S
 
 private Data createData(JSONValue j) {
     import flow.core.data.engine : createData, Data, PropertyInfo;
-    import flow.core.util.templates : as;
+    import flow.core.util.traits : as;
     import std.datetime : DateTime, Date, Duration;
     import std.uuid : UUID;
     import std.variant : Variant;
@@ -321,7 +321,7 @@ if(
     canHandle!T &&
     !is(T : Data)
 ) {
-    import flow.core.util.templates : as;
+    import flow.core.util.traits : as;
     import std.base64 : Base64;
     import std.datetime : DateTime, Date, Duration, hnsecs;
     import std.json : JSON_TYPE;
@@ -405,7 +405,7 @@ if(is(T : Data)) {
 
 unittest { test.header("data.json: json serialization of data and member");
     import flow.core.data.engine : TestData, InheritedTestData, TestEnum;
-    import flow.core.util.templates : as;
+    import flow.core.util.traits : as;
     import std.json : parseJSON;
     import std.uuid : parseUUID;
 

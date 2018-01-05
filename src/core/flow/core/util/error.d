@@ -2,7 +2,7 @@ module flow.core.util.error;
 
 /// mixin allowing to derrive from FlowError
 mixin template error() {
-    private import flow.core.util.templates : fqn;
+    private import flow.core.util.traits : fqn;
 
     override @property string type() {return fqn!(typeof(this));}
 
@@ -14,7 +14,7 @@ mixin template error() {
 /// mixin allowing to derrive from FlowException
 mixin template exception() {
     private import flow.core.data.engine : Data;
-    private import flow.core.util.templates : fqn;
+    private import flow.core.util.traits : fqn;
 
     override @property string type() {return fqn!(typeof(this));}
 

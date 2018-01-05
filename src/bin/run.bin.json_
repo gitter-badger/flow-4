@@ -1,5 +1,0 @@
-{
-    "deps": ["core"],
-    "cflags": [],
-    "lflags": []
-}

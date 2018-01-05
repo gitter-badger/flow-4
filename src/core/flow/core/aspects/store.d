@@ -7,7 +7,7 @@ private import flow.core.util;
 
 class StoringAspect : Data { mixin _data;
     @field Duration delay;
-    @field size_t last;
+    @field ulong last;
     @field bool lastStored;
 }
 
@@ -30,12 +30,14 @@ class CheckStoreTick : Tick {
     }
 }
 
-void addStoringAspect(EntityMeta em, Duration d = 1.seconds) {
+StoringAspect addStoringAspect(EntityMeta em, Duration d = 1.seconds) {
     import std.uuid : UUID;
     
     auto a = new StoringAspect; em.aspects ~= a;
     a.delay = d;
     auto tm = em.addTick(fqn!CheckStoreTick, null, UUID.init, true);
+
+    return a;
 }
 
 unittest { test.header("aspects.store: in control");

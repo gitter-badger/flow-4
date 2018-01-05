@@ -7,7 +7,7 @@ private import flow.core.util;
 
 class HibernatingAspect : Data { mixin _data;
     @field Duration delay;
-    @field size_t last;
+    @field ulong last;
 }
 
 class CheckHibernateTick : Tick {
@@ -28,12 +28,14 @@ class CheckHibernateTick : Tick {
     }
 }
 
-void addHibernatingAspect(EntityMeta em, Duration d = 1.seconds) {
+HibernatingAspect addHibernatingAspect(EntityMeta em, Duration d = 1.seconds) {
     import std.uuid : UUID;
     
     auto a = new HibernatingAspect; em.aspects ~= a;
     a.delay = d;
     auto tm = em.addTick(fqn!CheckHibernateTick, null, UUID.init, true);
+
+    return a;
 }
 
 unittest { test.header("aspects.hibernate: in control");

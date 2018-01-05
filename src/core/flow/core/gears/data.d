@@ -15,19 +15,41 @@ abstract class Signal : IdData { mixin _data;
     @field EntityPtr src;
 }
 
+mixin template _unicast() { mixin _data; }
+
 /// data representing an unicast
-class Unicast : Signal { mixin _data;
+abstract class Unicast : Signal { mixin _data;
     @field EntityPtr dst;
 }
 
+mixin template _anycast() { mixin _data; }
+
 /// data representing a anycast
-class Anycast : Signal { mixin _data;
+abstract class Anycast : Signal { mixin _data;
     @field string dst;
 }
 
+mixin template _multicast() { mixin _data; }
+
 /// data representing a multicast
-class Multicast : Signal { mixin _data;
+abstract class Multicast : Signal { mixin _data;
     @field string dst;
+}
+
+mixin template _req() { mixin _data; }
+
+abstract class Req : Unicast { mixin _unicast; }
+
+mixin template _rep() { mixin _data;
+    this() {super();}
+    this(Req req) {super();}
+}
+
+abstract class Rep : Unicast { mixin _unicast;
+    @field Req req;
+
+    this() {}
+    this(Req req) {this.req = req;}
 }
 
 class Damage : Data { mixin _data;
@@ -42,7 +64,7 @@ class SpaceMeta : Data { mixin _data;
     @field string id;
     
     /// amount of pipes threads for executing ticks
-    @field size_t pipes;
+    @field ulong pipes;
 
     /// junctions allow signals to get shipped across spaces
     @field JunctionMeta[] junctions;
@@ -114,9 +136,9 @@ class MeshConnectorMeta : Data { mixin _data;
 
 class MeshJunctionMeta : JunctionMeta { mixin _data;
     @field string[] known;
-    @field size_t timeout;
-    @field size_t ackTimeout;
-    @field size_t ackInterval;
+    @field ulong timeout;
+    @field ulong ackTimeout;
+    @field ulong ackInterval;
 
     @field MeshConnectorMeta conn;
 }

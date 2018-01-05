@@ -14,8 +14,9 @@ class StateRefusedException : FlowException {mixin exception;}
 abstract class StateMachine(T) if (isScalarType!T) {
     private import core.sync.rwmutex : ReadWriteMutex;
 
-    private ReadWriteMutex _lock;
-    /*protected */@property ReadWriteMutex lock(){return this._lock;}
+    private ReadWriteMutex lock;
+    protected ReadWriteMutex.Reader reader() {return this.lock.reader;}
+    protected ReadWriteMutex.Writer writer() {return this.lock.writer;}
     private T _state;
 
     /// actual state
@@ -28,7 +29,7 @@ abstract class StateMachine(T) if (isScalarType!T) {
         auto allowed = false;
         T oldState;
         Exception error;
-        synchronized(this.lock.writer) {
+        synchronized(this.writer) {
             if(this._state == value)
                 return; // already in state, do nothing
             else {
@@ -52,13 +53,13 @@ abstract class StateMachine(T) if (isScalarType!T) {
     }
 
     protected this() {
-        this._lock = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_WRITERS);
+        this.lock = new ReadWriteMutex();
 
         this.onStateChanged(this.state, this.state);
     }
 
     protected void ensureState(T requiredState) {
-        synchronized(this.lock.reader)
+        synchronized(this.reader)
             // no lock required since primitives are synced by D
             if(this._state != requiredState)
                 throw new InvalidStateException();
@@ -66,7 +67,7 @@ abstract class StateMachine(T) if (isScalarType!T) {
 
     // TODO replace ensure state or overloadings with template
     protected void ensureStateOr(T state1, T state2) {
-        synchronized(this.lock.reader) {
+        synchronized(this.reader) {
             auto state = this._state;
             if(state != state1 && state != state2)
                 throw new InvalidStateException();
@@ -74,7 +75,7 @@ abstract class StateMachine(T) if (isScalarType!T) {
     }
 
     protected void ensureStateOr(T state1, T state2, T state3) {
-        synchronized(this.lock.reader) {
+        synchronized(this.reader) {
             auto state = this._state;
             if(state != state1 && state != state2 && state != state3)
                 throw new InvalidStateException();
@@ -82,7 +83,7 @@ abstract class StateMachine(T) if (isScalarType!T) {
     }
 
     protected void ensureStateOr(T state1, T state2, T state3, T state4) {
-        synchronized(this.lock.reader) {
+        synchronized(this.reader) {
             auto state = this._state;
             if(state != state1 && state != state2 && state != state3 && state != state4)
                 throw new InvalidStateException();

@@ -1,0 +1,4 @@
+{
+    "of": "flowctl",
+    "deps": ["core", "ipc-nanomsg", "service"]
+}

@@ -133,27 +133,27 @@ class DownTick : Tick {
     }
 }
 
-class OutReq : Unicast { mixin _data;
+class OutReq : Unicast { mixin _unicast;
     @field string msg;
 }
 
-class AnyOutReq : Anycast { mixin _data;
+class AnyOutReq : Anycast { mixin _anycast;
     @field string msg;
 }
 
-class MultiOutReq : Multicast { mixin _data;
+class MultiOutReq : Multicast { mixin _multicast;
     @field string msg;
 }
 
-class InReq : Unicast { mixin _data;
+class InReq : Unicast { mixin _unicast;
     @field string msg;
 }
 
-class AnyInReq : Anycast { mixin _data;
+class AnyInReq : Anycast { mixin _anycast;
     @field string msg;
 }
 
-class MultiInReq : Multicast { mixin _data;
+class MultiInReq : Multicast { mixin _multicast;
     @field string msg;
 }
 
@@ -184,7 +184,7 @@ class EnqueueJob : Tick {
     }
 }
 
-class InResponse : Unicast { mixin _data;
+class InResponse : Unicast { mixin _unicast;
     @field Signal trigger;
     @field string input;
 }
@@ -214,7 +214,7 @@ class DonePoll : Tick {
     }
 }
 
-void addStdioAspect(EntityMeta em, Duration iS = 10.msecs, Duration pD = 10.msecs) {
+StdioAspect addStdioAspect(EntityMeta em, Duration iS = 10.msecs, Duration pD = 10.msecs) {
     import std.uuid : UUID;
     
     auto a = new StdioAspect; em.aspects ~= a;
@@ -222,4 +222,6 @@ void addStdioAspect(EntityMeta em, Duration iS = 10.msecs, Duration pD = 10.msec
     a.pollDelay = pD;
     em.addEvent(EventType.OnTicking, fqn!UpTick);
     em.addEvent(EventType.OnFreezing, fqn!DownTick);
+    
+    return a;
 }

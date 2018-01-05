@@ -30,11 +30,20 @@
             "cwd": "${workspaceRoot}"
         },
         {
-            "name": "test/flow-run",
+            "name": "bin/flow",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceRoot}/test/flow-run",
+            "program": "${workspaceRoot}/bin/flow",
             "args": [ ],
+            "environment": [{"name": "LD_LIBRARY_PATH", "value": "${workspaceRoot}/lib"}],
+            "cwd": "${workspaceRoot}"
+        },
+        {
+            "name": "bin/flowctl",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/bin/flowctl",
+            "args": [ "shutdown" ],
             "environment": [{"name": "LD_LIBRARY_PATH", "value": "${workspaceRoot}/lib"}],
             "cwd": "${workspaceRoot}"
         },

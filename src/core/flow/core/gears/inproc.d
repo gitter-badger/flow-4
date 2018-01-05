@@ -66,17 +66,17 @@ class InProcessJunction : Junction {
     @property UUID id() {return this.meta.id;}
 
     override @property string[] list() {
-        synchronized(this.lock.reader)
+        synchronized(this.reader)
             return pool[this.id].keys;
     }
 
     shared static this() {
-        pLock = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_WRITERS);
+        pLock = new ReadWriteMutex();
     }
 
     /// ctor
     this() {
-        this.cLock = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_WRITERS);
+        this.cLock = new ReadWriteMutex();
 
         super();
     }
@@ -124,7 +124,7 @@ class InProcessJunction : Junction {
         import flow.core.util : as;
 
         synchronized(pLock.reader)
-            synchronized(this.lock.reader)
+            synchronized(this.reader)
                 synchronized(this.cLock.reader) {
                     if(dst in this.channels) {
                         if(dst in pool[this.id])

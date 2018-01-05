@@ -10,7 +10,7 @@ class LockData : Data { mixin _data;
     ReadWriteMutex.Writer writer() {return this.lock.writer;}
 
     this() {
-        this.lock = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_WRITERS);
+        this.lock = new ReadWriteMutex();
     }
 }
 

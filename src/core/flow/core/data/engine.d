@@ -3,8 +3,9 @@ module flow.core.data.engine;
 private import std.variant;
 private import std.range;
 private import std.traits;
-private import flow.core.util;
+private import flow.core.util.traits;
 private import msgpack;
+version(unittest) public static import test = flow.core.util.test;
 
 /// checks if data engine can handle a certain data type
 template canHandle(T) {
@@ -108,7 +109,7 @@ abstract class Data {
     @nonPacked abstract @property string dataType();
 
     override bool opEquals(Object o) {
-        import flow.core.util.templates : as;
+        import flow.core.util.traits : as;
 
         auto c = o.as!Data;
         if(c !is null && this.dataType == c.dataType) {
@@ -123,7 +124,7 @@ abstract class Data {
 
     /// deep snaps data object (copies whole memory)
     @property Data snap() {
-        import flow.core.util.templates : as;
+        import flow.core.util.traits : as;
 
         Data c = Object.factory(this.dataType).as!Data;
 
@@ -141,7 +142,7 @@ enum field;
 
 /// mixin allowing to derrive from data
 mixin template _data() {
-    private static import ___flowutil = flow.core.util.templates, ___flowdata = flow.core.data.engine;
+    private static import ___flowutil = flow.core.util.traits, ___flowdata = flow.core.data.engine;
     private static import ___traits = std.traits;
     private static import ___range = std.range;
 
@@ -154,7 +155,7 @@ mixin template _data() {
 
     private static PropertyInfo getPropertyInfo(T, string name)()
     if (___flowdata.canHandle!T && (!___traits.isArray!T || is(T==string))) {
-        import flow.core.util.templates : as;
+        import flow.core.util.traits : as;
         import msgpack : Packer, Unpacker;
         import std.datetime : DateTime, Date, Duration;
         import std.traits : OriginalType, isScalarType;
@@ -227,7 +228,7 @@ mixin template _data() {
         ___flowdata.canHandle!(___range.ElementType!AT) &&
         !is(AT == string)
     ) {
-        import flow.core.util.templates : as;
+        import flow.core.util.traits : as;
         import msgpack : Packer, Unpacker;
         import std.datetime : DateTime, Date, Duration;
         import std.traits : OriginalType, isScalarType;
@@ -303,7 +304,7 @@ mixin template _data() {
     override @property string dataType() {return ___flowutil.fqn!(typeof(this));}
     
     shared static this() {
-        import flow.core.util : as;
+        import flow.core.util.traits : as;
         import std.range : ElementType;
         import std.traits : hasUDA, isArray;
 
@@ -336,7 +337,7 @@ mixin template fieldDeprecated(T, string _name) {
 
 /// create a data object from its type name
 Data createData(string name) {
-    import flow.core.util.templates : as;
+    import flow.core.util.traits : as;
 
     return Object.factory(name).as!Data;
 }
@@ -500,7 +501,7 @@ unittest { test.header("data.engine: static data usage");
 test.footer(); }
 
 unittest { test.header("data.engine: snap and == of data and member");
-    import flow.core.util.templates : as;
+    import flow.core.util.traits : as;
 
     auto d = new InheritedTestData;
     d.uinteger = 5;
@@ -539,7 +540,7 @@ class PropertyNotExistingException : Exception {
 
 private Variant get(Data d, string name){
     import flow.core.data.engine : PropertyInfo;
-    import flow.core.util.templates : as;
+    import flow.core.util.traits : as;
 
     if(name in d.properties)
         return d.properties[name].as!PropertyInfo.get(d);
@@ -551,7 +552,7 @@ private Variant get(Data d, string name){
 T get(T)(Data d, string name)
 if(is(T : Data)) {
     import flow.core.data.engine : Data;
-    import flow.core.util.templates : as;
+    import flow.core.util.traits : as;
 
     return d.get(name).get!Data().as!T;
 }
@@ -563,7 +564,7 @@ if(
     is(ElementType!T : Data)
 ) {
     import flow.core.data.engine : Data;
-    import flow.core.util.templates : as;
+    import flow.core.util.traits : as;
 
     return d.get(name).get!(Data[])().as!T;
 }
@@ -595,7 +596,7 @@ if(
 
 private bool set(Data d, string name, Variant val) {
     import flow.core.data.engine : PropertyInfo;
-    import flow.core.util.templates : as;
+    import flow.core.util.traits : as;
 
     if(name in d.properties)
         return d.properties[name].as!PropertyInfo.set(d, val);
@@ -607,7 +608,7 @@ private bool set(Data d, string name, Variant val) {
 bool set(T)(Data d, string name, T val)
 if(is(T : Data)) {
     import flow.core.data.engine : Data;
-    import flow.core.util.templates : as;
+    import flow.core.util.traits : as;
     import std.variant : Variant;
 
     return d.set(name, Variant(val.as!Data));
@@ -620,7 +621,7 @@ if(
     is(ElementType!T : Data)
 ) {
     import flow.core.data.engine : Data;
-    import flow.core.util.templates : as;
+    import flow.core.util.traits : as;
     import std.variant : Variant;
 
     return d.set(name, Variant(val.as!(Data[])));
@@ -654,7 +655,7 @@ if(
 }
 
 unittest { test.header("data.engine: dynamic data usage");
-    import flow.core.util.templates : as;
+    import flow.core.util.traits : as;
     import std.range : empty;
 
     auto d = fqn!InheritedTestData.createData().as!InheritedTestData;

@@ -7,7 +7,7 @@ private import flow.core.util;
 
 class FreezingAspect : Data { mixin _data;
     @field Duration delay;
-    @field size_t last;
+    @field ulong last;
 }
 
 class CheckFreezeTick : Tick {
@@ -26,12 +26,14 @@ class CheckFreezeTick : Tick {
     }
 }
 
-void addFreezingAspect(EntityMeta em, Duration d = 1.seconds) {
+FreezingAspect addFreezingAspect(EntityMeta em, Duration d = 1.seconds) {
     import std.uuid : UUID;
     
     auto a = new FreezingAspect; em.aspects ~= a;
     a.delay = d;
     auto tm = em.addTick(fqn!CheckFreezeTick, null, UUID.init, true);
+    
+    return a;
 }
 
 unittest { test.header("aspects.freeze: in control");

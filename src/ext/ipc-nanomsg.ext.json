@@ -1,5 +1,3 @@
 {
-    "deps": ["core", "nanomsg"],
-    "cflags": [],
-    "lflags": []
+    "deps": ["core", "nanomsg"]
 }

@@ -1,8 +1,9 @@
-module flow.core.crypt;
+module flow.core.util.crypt;
 
 private import deimos.openssl.ssl;
 private import flow.core.util.error;
-private import flow.core.util;
+private import flow.core.util.traits;
+version(unittest) public static import test = flow.core.util.test;
 
 class CryptoInitException : FlowException {mixin exception;}
 
@@ -340,11 +341,8 @@ private ubyte[] decrypt(string title, string cipherFunc)(ref ubyte[] crypt, Ciph
 kill others ctx by destructing it however
 multiple readers can use it concurrently */
 private class Cipher {
-    private import core.sync.rwmutex : ReadWriteMutex;
     private import core.thread;
     private import std.datetime.systime;
-
-    private ReadWriteMutex lock;
 
     /// a cipher algorithm needs a hash algorithm
     private string cipher, hash;
@@ -352,9 +350,7 @@ private class Cipher {
     /// generated cipher
     private CipherKeyData data;
 
-    this(string cipher, string hash) {
-        this.lock = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_WRITERS);
-        
+    this(string cipher, string hash) {        
         this.cipher = cipher;
         this.hash = hash;
 
@@ -363,8 +359,6 @@ private class Cipher {
 
     this(string cipher, string hash, ref ubyte[] data) {
         import msgpack : unpack;
-
-        this.lock = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_WRITERS);
         
         this.cipher = cipher;
         this.hash = hash;
@@ -380,7 +374,7 @@ private class Cipher {
         import flow.core.util.log : Log, LL;
         import std.conv : to;
 
-        synchronized(this.lock.reader) try {
+        try {
             return data.encrypt(this.cipher, this.data);
         } catch(Exception exc) {
             Log.msg(LL.Error, "decrypting by cipher failed", exc);
@@ -393,7 +387,7 @@ private class Cipher {
         import flow.core.util.log : Log, LL;
         import std.conv : to;
 
-        synchronized(this.lock.reader) try {
+        try {
             return crypt.decrypt(this.cipher, this.data);
         } catch(Exception exc) {
             Log.msg(LL.Error, "decrypting by cipher failed", exc);
@@ -512,7 +506,7 @@ private class Peer {
     private long[ulong] inValidity;
 
     this(Crypto crypto, string crt, Duration outValidity, bool check = true) {
-        this.lock = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_WRITERS);
+        this.lock = new ReadWriteMutex();
 
         this.crypto = crypto;
         this._crt = crt;
@@ -659,7 +653,7 @@ private void cleanSSL() {
     //ERR_free_strings();
 }
 
-package final class Crypto {
+final class Crypto {
     private import core.sync.rwmutex : ReadWriteMutex;
     private import core.thread;
     private import core.time;
@@ -714,7 +708,7 @@ package final class Crypto {
     //https://www.youtube.com/watch?v=uwzWVG_LDGA
 
     this(string addr, string key, string crt, string cipher, string hash, bool check = true, Duration cipherValidity = 10.minutes) {
-        this.lock = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_WRITERS);
+        this.lock = new ReadWriteMutex();
 
         synchronized if(!initSSL)
             loadSSL();
