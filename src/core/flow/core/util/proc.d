@@ -1,7 +1,10 @@
-module flow.core.gears.proc;
+module flow.core.util.proc;
 
-import core.thread;
-import flow.core.util;
+private import core.thread;
+private import flow.core.util.atomic;
+private import flow.core.util.state;
+private import flow.core.util.traits;
+private import std.parallelism : totalCPUs;
 
 package enum ProcessorState {
     Stopped = 0,
@@ -25,9 +28,9 @@ private final class Pipe : Thread
     Processor proc;
 }
 
-struct Job {
-    private Job* prev;
-    private Job* next;
+class Job {
+    private Job prev;
+    private Job next;
 
     private void delegate() exec;
     private void delegate(Throwable thr) error;
@@ -48,8 +51,8 @@ final class Processor : StateMachine!ProcessorState {
 
     private Pipe[] pipes;
 
-    private Job* head;
-    private Job* tail;
+    private Job head;
+    private Job tail;
     private PoolState status = PoolState.running;
     private long nextTime;
     private Condition workerCondition;
@@ -75,7 +78,7 @@ final class Processor : StateMachine!ProcessorState {
         stopNow
     }
 
-    this(size_t nWorkers = 1) {
+    this(size_t pipes = totalCPUs - 1) {
 
         synchronized(typeid(Processor))
         {
@@ -85,15 +88,15 @@ final class Processor : StateMachine!ProcessorState {
             // and will increment it.  The second worker to be initialized will
             // have this index plus 1.
             nextThreadIndex = instanceStartIndex;
-            nextInstanceIndex += nWorkers;
+            nextInstanceIndex += pipes;
         }
 
         this.queueMutex = new Mutex(this);
         this.waiterMutex = new Mutex();
-        workerCondition = new Condition(queueMutex);
-        waiterCondition = new Condition(waiterMutex);
+        this.workerCondition = new Condition(queueMutex);
+        this.waiterCondition = new Condition(waiterMutex);
         
-        this.pipes = new Pipe[nWorkers];
+        this.pipes = new Pipe[pipes];
     }
 
     override protected bool onStateChanging(ProcessorState o, ProcessorState n) {
@@ -168,7 +171,7 @@ final class Processor : StateMachine!ProcessorState {
         import flow.core.util : atomicReadUbyte, atomicSetUbyte;
 
         while (atomicReadUbyte(this.status) != PoolState.stopNow) {
-            Job* task = pop();
+            Job task = pop();
             if (task is null) {
                 if (atomicReadUbyte(this.status) == PoolState.finishing) {
                     atomicSetUbyte(this.status, PoolState.stopNow);
@@ -224,7 +227,7 @@ final class Processor : StateMachine!ProcessorState {
     }
 
     /// Pop a task off the queue.
-    private Job* pop()
+    private Job pop()
     {
         this.queueLock();
         scope(exit) this.queueUnlock();
@@ -237,7 +240,7 @@ final class Processor : StateMachine!ProcessorState {
         return ret;
     }
 
-    private Job* popNoSync()
+    private Job popNoSync()
     out(ret) {
         /* If task.prev and task.next aren't null, then another thread
          * can try to delete this task from the pool after it's
@@ -254,7 +257,7 @@ final class Processor : StateMachine!ProcessorState {
         auto stdTime = Clock.currStdTime;
 
         this.nextTime = long.max;
-        Job* ret = this.head;
+        Job ret = this.head;
         if(ret !is null) {
             // skips ticks not to execute yet
             while(ret !is null && ret.time > stdTime) {
@@ -280,7 +283,7 @@ final class Processor : StateMachine!ProcessorState {
         return ret;
     }
 
-    private void doJob(Job* job) {
+    private void doJob(Job job) {
         import flow.core.util : atomicSetUbyte;
 
         assert(job.taskStatus == JobState.InProgress);
@@ -303,21 +306,21 @@ final class Processor : StateMachine!ProcessorState {
     }
 
 
-    void run(Job* j) {
+    void run(Job j) {
         this.ensureState(ProcessorState.Started);
 
         this.abstractPut(j);
     }
     
     /// Push a task onto the queue.
-    private void abstractPut(Job* task)
+    private void abstractPut(Job task)
     {
         queueLock();
         scope(exit) queueUnlock();
         abstractPutNoSync(task);
     }
 
-    private void abstractPutNoSync(Job* task)
+    private void abstractPutNoSync(Job task)
     in {
         assert(task);
     } out {

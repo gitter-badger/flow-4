@@ -12,7 +12,7 @@ enum LL {
 
 /// flow system logger
 final class Log {
-    private import flow.core.data.engine : Data;
+    private import flow.core.data.base : Data;
     private import std.ascii : newline;
     private import std.range : isArray;
 

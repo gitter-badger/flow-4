@@ -1,6 +1,6 @@
 module flow.core.data.data;
 
-private import flow.core.data.engine;
+private import flow.core.data.base;
 
 class LockData : Data { mixin _data;
     private import core.sync.rwmutex : ReadWriteMutex;

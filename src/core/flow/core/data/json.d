@@ -1,6 +1,6 @@
 module flow.core.data.json;
 
-private import flow.core.data.engine;
+private import flow.core.data.base;
 private import flow.core.util;
 private import std.json;
 private import std.range;
@@ -8,7 +8,7 @@ private import std.traits;
 private import std.variant;
 
 private JSONValue jsonValue(Variant t, PropertyInfo pi) {
-    import flow.core.data.engine : Data, TypeDesc;
+    import flow.core.data.base : Data, TypeDesc;
     import std.datetime : DateTime, Date, Duration;
     import std.uuid : UUID;
 
@@ -212,7 +212,7 @@ if(is(T == std.datetime.Duration)) {
 
 private JSONValue jsonValue(T)(T data)
 if(is(T : Data)) {
-    import flow.core.data.engine : PropertyInfo;
+    import flow.core.data.base : PropertyInfo;
     import flow.core.util.traits : as;
     import std.json : JSONValue;
 
@@ -268,7 +268,7 @@ Data createDataFromJson(string str, JsonSerializer serializer = JsonSerializer.S
 }
 
 private Data createData(JSONValue j) {
-    import flow.core.data.engine : createData, Data, PropertyInfo;
+    import flow.core.data.base : createData, Data, PropertyInfo;
     import flow.core.util.traits : as;
     import std.datetime : DateTime, Date, Duration;
     import std.uuid : UUID;
@@ -382,7 +382,7 @@ if(
 
 private Variant get(T)(JSONValue j, Data d, PropertyInfo pi)
 if(is(T : Data)) {
-    import flow.core.data.engine : Data, TypeDesc;
+    import flow.core.data.base : Data, TypeDesc;
     import std.json : JSON_TYPE;
     import std.variant : Variant;
 
@@ -404,7 +404,7 @@ if(is(T : Data)) {
 }
 
 unittest { test.header("data.json: json serialization of data and member");
-    import flow.core.data.engine : TestData, InheritedTestData, TestEnum;
+    import flow.core.data.base : TestData, InheritedTestData, TestEnum;
     import flow.core.util.traits : as;
     import std.json : parseJSON;
     import std.uuid : parseUUID;
@@ -428,16 +428,16 @@ unittest { test.header("data.json: json serialization of data and member");
     auto templ = "{"~
         "\"additional\":\"ble\","~
         "\"boolean\":true,"~
-        "\"dataType\":\"flow.core.data.engine.InheritedTestData\","~
+        "\"dataType\":\"flow.core.data.base.InheritedTestData\","~
         "\"enumeration\":1,"~
         "\"enumerationA\":[1,0],"~
         "\"inner\":{"~
-            "\"dataType\":\"flow.core.data.engine.TestData\","~
+            "\"dataType\":\"flow.core.data.base.TestData\","~
             "\"integer\":3"~
         "},"~
         "\"innerA\":["~
-            "{\"dataType\":\"flow.core.data.engine.TestData\"},"~
-            "{\"dataType\":\"flow.core.data.engine.TestData\"}"~
+            "{\"dataType\":\"flow.core.data.base.TestData\"},"~
+            "{\"dataType\":\"flow.core.data.base.TestData\"}"~
         "],"~
         "\"text\":\"foo\","~
         "\"textA\":[\"foo\",\"bar\"],"~

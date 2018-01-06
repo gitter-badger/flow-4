@@ -12,8 +12,10 @@ class StateRefusedException : FlowException {mixin exception;}
 
 /// state machine mixin template
 abstract class StateMachine(T) if (isScalarType!T) {
+    private import core.sync.mutex : Mutex;
     private import core.sync.rwmutex : ReadWriteMutex;
 
+    private Mutex setLock;
     private ReadWriteMutex lock;
     protected ReadWriteMutex.Reader reader() {return this.lock.reader;}
     protected ReadWriteMutex.Writer writer() {return this.lock.writer;}
@@ -29,30 +31,33 @@ abstract class StateMachine(T) if (isScalarType!T) {
         auto allowed = false;
         T oldState;
         Exception error;
-        synchronized(this.writer) {
-            if(this._state == value)
-                return; // already in state, do nothing
-            else {
-                try {
-                    allowed = this.onStateChanging(this._state, value);
-                } catch(Exception exc) {
-                    error = exc;
-                }
+        synchronized(this.setLock) {
+            synchronized(this.writer) {
+                if(this._state == value)
+                    return; // already in state, do nothing
+                else {
+                    try {
+                        allowed = this.onStateChanging(this._state, value);
+                    } catch(Exception exc) {
+                        error = exc;
+                    }
 
-                if(allowed) {
-                    oldState = this._state;
-                    this._state = value;
+                    if(allowed) {
+                        oldState = this._state;
+                        this._state = value;
+                    }
                 }
             }
-        }
 
-        if(allowed)
-            this.onStateChanged(oldState, this._state);
-        else
-            throw new StateRefusedException(string.init, null, [error]);
+            if(allowed)
+                this.onStateChanged(oldState, this._state);
+            else
+                throw new StateRefusedException(string.init, null, [error]);
+        }
     }
 
     protected this() {
+        this.setLock = new Mutex();
         this.lock = new ReadWriteMutex();
 
         this.onStateChanged(this.state, this.state);

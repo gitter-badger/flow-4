@@ -1,4 +1,4 @@
-module flow.core.data.engine;
+module flow.core.data.base;
 
 private import std.variant;
 private import std.range;
@@ -142,7 +142,7 @@ enum field;
 
 /// mixin allowing to derrive from data
 mixin template _data() {
-    private static import ___flowutil = flow.core.util.traits, ___flowdata = flow.core.data.engine;
+    private static import ___flowutil = flow.core.util.traits, ___flowdata = flow.core.data.base;
     private static import ___traits = std.traits;
     private static import ___range = std.range;
 
@@ -308,7 +308,7 @@ mixin template _data() {
         import std.range : ElementType;
         import std.traits : hasUDA, isArray;
 
-        static assert(is(typeof(this) : Data), "data has to be derrived from flow.core.data.engine.Data");
+        static assert(is(typeof(this) : Data), "data has to be derrived from flow.core.data.base.Data");
         debug(data) {import std.stdio : writeln; writeln(typeof(this).stringof);}
 
         foreach(m; __traits(allMembers, typeof(this))) {
@@ -539,7 +539,7 @@ class PropertyNotExistingException : Exception {
 }
 
 private Variant get(Data d, string name){
-    import flow.core.data.engine : PropertyInfo;
+    import flow.core.data.base : PropertyInfo;
     import flow.core.util.traits : as;
 
     if(name in d.properties)
@@ -551,7 +551,7 @@ private Variant get(Data d, string name){
 /// get property as data
 T get(T)(Data d, string name)
 if(is(T : Data)) {
-    import flow.core.data.engine : Data;
+    import flow.core.data.base : Data;
     import flow.core.util.traits : as;
 
     return d.get(name).get!Data().as!T;
@@ -563,7 +563,7 @@ if(
     isArray!T &&
     is(ElementType!T : Data)
 ) {
-    import flow.core.data.engine : Data;
+    import flow.core.data.base : Data;
     import flow.core.util.traits : as;
 
     return d.get(name).get!(Data[])().as!T;
@@ -595,7 +595,7 @@ if(
 }
 
 private bool set(Data d, string name, Variant val) {
-    import flow.core.data.engine : PropertyInfo;
+    import flow.core.data.base : PropertyInfo;
     import flow.core.util.traits : as;
 
     if(name in d.properties)
@@ -607,7 +607,7 @@ private bool set(Data d, string name, Variant val) {
 /// set property using data
 bool set(T)(Data d, string name, T val)
 if(is(T : Data)) {
-    import flow.core.data.engine : Data;
+    import flow.core.data.base : Data;
     import flow.core.util.traits : as;
     import std.variant : Variant;
 
@@ -620,7 +620,7 @@ if(
     isArray!T &&
     is(ElementType!T : Data)
 ) {
-    import flow.core.data.engine : Data;
+    import flow.core.data.base : Data;
     import flow.core.util.traits : as;
     import std.variant : Variant;
 

@@ -3,7 +3,6 @@ module flow.core.gears.engine;
 private import core.atomic;
 private import flow.core.data;
 private import flow.core.gears.data;
-private import flow.core.gears.proc;
 private import flow.core.util;
 private import std.uuid;
 
@@ -16,6 +15,7 @@ enum SystemState {
 
 /// represents a definded change in systems information
 abstract class Tick {
+    private import core.atomic : atomicOp, atomicLoad, MemoryOrder;
     private import core.time : Duration;
     private import flow.core.data : Data;
     private import std.datetime.systime : SysTime;
@@ -31,7 +31,9 @@ abstract class Tick {
     protected @property Signal trigger() {return this.meta.trigger !is null ? this.meta.trigger.snap : null;}
     protected @property TickInfo previous() {return this.meta.previous !is null ? this.meta.previous.snap : null;}
     protected @property Data data() {return this.meta.data;}
-    protected @property size_t count() {return this.meta.control ? this.entity.count : size_t.init;}
+    protected @property size_t count() {
+        return this.meta.control ? atomicLoad!(MemoryOrder.raw)(this.entity.count) : size_t.init;
+    }
 
     /** context of hosting entity
     warning you have to sync it as reader when accessing it reading
@@ -59,42 +61,23 @@ abstract class Tick {
     /// execute tick meant to be called by processor
     private void exec() {
         import std.datetime.systime : Clock;
-        this.entity.count++;
+        atomicOp!"+="(this.entity.count, 1.as!size_t);
 
         // run tick
         Log.msg(LL.FDebug, this.logPrefix~"running tick", this.meta);
-        this.run();
-        Log.msg(LL.FDebug, this.logPrefix~"finished tick", this.meta);
+        try {
+            this.run();
+            Log.msg(LL.FDebug, this.logPrefix~"finished tick", this.meta);
+        } catch(Throwable thr) {
+            Log.msg(LL.Info, this.logPrefix~"handling error", thr, this.meta);
+            this.thr = thr;
+            this.error(this.thr);
+
+            Log.msg(LL.FDebug, this.logPrefix~"finished handling error", this.meta);
+        }
         
-        // if everything was successful cleanup and process next
-        this.meta.time = Clock.currStdTime;
+        this.meta.time = Clock.currStdTime; // set endtime for informing pool
         this.entity.put(this);
-
-        // deregistering
-        atomicOp!"-="(this.entity.execCount, 1.as!size_t);
-    }
-
-    private void catchError(Throwable thr) {
-        Log.msg(LL.Info, this.logPrefix~"handling error", thr, this.meta);
-
-        this.thr = thr;
-
-        this.job = Job(&this.runError, &this.fatal);
-        this.entity.space.proc.run(&this.job);
-    }
-
-    private void runError() {
-        import std.datetime.systime : Clock;
-        this.error(this.thr);
-
-        Log.msg(LL.FDebug, this.logPrefix~"finished handling error", this.meta);
-
-        // if everything was successful cleanup
-        this.meta.time = Clock.currStdTime;
-        this.entity.put(this);
-
-        // deregistering
-        atomicOp!"-="(this.entity.execCount, 1.as!size_t);
     }
 
     private void fatal(Throwable thr) {
@@ -108,9 +91,6 @@ abstract class Tick {
 
         this.meta.time = Clock.currStdTime; // set endtime for informing pool
         this.entity.put(this);
-
-        // deregistering
-        atomicOp!"-="(this.entity.execCount, 1.as!size_t);
     }
     
     /// invoke tick
@@ -312,7 +292,7 @@ abstract class Tick {
         return this.entity.getInfo(name);
     }
 
-    /// writes a file in entities filesystem rootasyncOp
+    /// writes a file in entities filesystem root
     void write(string name, const void[] buffer) {
         this.entity.write(name, buffer);
     }
@@ -390,13 +370,12 @@ private class Entity : StateMachine!SystemState {
     private import core.sync.rwmutex : ReadWriteMutex;
     private import flow.core.data;
     private import std.datetime.systime : SysTime;
+
+    Operator ops;
     
     Mutex _poolLock;
     Tick[][string] _pool;
-    size_t count;
-
-    shared size_t execCount; // counting tick executions
-    shared size_t opCount; // counting async operations
+    shared size_t count;
      
     Space space;
     EntityMeta meta;
@@ -408,6 +387,8 @@ private class Entity : StateMachine!SystemState {
         super();
 
         this._poolLock = new Mutex;
+        this.ops = new Operator;
+
         m.ptr.space = s.meta.id;
         this.meta = m;
         this.space = s;
@@ -462,65 +443,59 @@ private class Entity : StateMachine!SystemState {
     }
 
     private void invoke(TickMeta next) {
-        import std.parallelism : taskPool, task;
-
-        this.asyncOp({            
-            synchronized(this.reader) { 
+        this.ops.async(this.space.actProc, {            
+            synchronized(this.reader) {
                 if(this.state == SystemState.Ticking) {
                     // create a new tick of given type or notify failing and stop
                     switch(next.info.type) {
                         case fqn!EntityFreezeSystemTick:
                             auto control = next.control;
                             if(control)
-                                this.asyncOp(&this.freeze); // async for avoiding deadlock
+                                this.space.ops.async(this.space.ctlProc, &this.freeze); // async for avoiding deadlock
                             else
                                 Log.msg(LL.Warning, this.logPrefix~"non controlling tick tired to freeze entity", next.previous);
                             break;
                         case fqn!EntityStoreSystemTick:
                             auto control = next.control;
                             if(control)
-                                this.space.asyncOp({this.space.store(this.meta.ptr.id);}); // async for avoiding deadlock
+                                this.space.ops.async(this.space.ctlProc, {this.space.store(this.meta.ptr.id);}); // async for avoiding deadlock
                             else
                                 Log.msg(LL.Warning, this.logPrefix~"non controlling tick tired to store entity", next.previous);
                             break;
                         case fqn!EntityHibernateSystemTick:
                             auto control = next.control;
                             if(control)
-                                this.space.asyncOp({this.space.hibernate(this.meta.ptr.id);}); // async for avoiding deadlock
+                                this.space.ops.async(this.space.ctlProc, {this.space.hibernate(this.meta.ptr.id);}); // async for avoiding deadlock
                             else
                                 Log.msg(LL.Warning, this.logPrefix~"non controlling tick tired to hibernate entity", next.previous);
                             break;
                         case fqn!SpaceFreezeSystemTick:
                             auto control = next.control;
                             if(control)
-                                this.space.asyncOp(&this.space.freeze); // async for avoiding deadlock
+                                this.space.process.ops.async(this.space.process.ctlProc, &this.space.freeze); // async for avoiding deadlock
                             else
                                 Log.msg(LL.Warning, this.logPrefix~"non controlling tick tired to freeze space", next.previous);
                             break;
                         case fqn!SpaceStoreSystemTick:
                             auto control = next.control;
                             if(control)
-                                this.space.asyncOp(&this.space.store); // async for avoiding deadlock
+                                this.space.process.ops.async(this.space.process.ctlProc, &this.space.store); // async for avoiding deadlock
                             else
                                 Log.msg(LL.Warning, this.logPrefix~"non controlling tick tired to store space", next.previous);
                             break;
                         default:
-                            atomicOp!"+="(this.execCount, 1.as!size_t);
                             this.exec(this.pop(next));
                             break;
                     }
-                } else this.meta.ticks ~= next;
+                } else {
+                    this.meta.ticks ~= next;
+                }
             }
         });
     }
 
     void exec(Tick tick) {
-        import std.parallelism : taskPool, task;
-
-        this.asyncOp({
-            tick.job = Job(&tick.exec, &tick.catchError, tick.meta.time);
-            this.space.proc.run(&tick.job);
-        });
+        this.ops.async(this.space.actProc, &tick.exec, &tick.fatal, tick.meta.time);
     }
 
     void dispose() {
@@ -528,10 +503,6 @@ private class Entity : StateMachine!SystemState {
 
         if(this.state == SystemState.Ticking)
             this.freeze();
-
-        // waiting for all async operations to finish
-        while(atomicOp!"!="(this.opCount, 0))
-            Thread.sleep(5.msecs);
         
         this.destroy;
     }
@@ -546,17 +517,6 @@ private class Entity : StateMachine!SystemState {
     void freeze() {
         if(this.state != SystemState.Frozen)
             this.state = SystemState.Frozen;
-    }
-
-    void asyncOp(void delegate() f) {
-        import std.parallelism : taskPool, task;
-
-        atomicOp!"+="(this.opCount, 1.as!size_t);
-        taskPool.put(task((){
-            scope(exit)
-                atomicOp!"-="(this.opCount, 1.as!size_t);
-            f();
-        }));
     }
 
     bool exists(string name) {
@@ -687,18 +647,13 @@ private class Entity : StateMachine!SystemState {
                 if(e.control)
                     t.meta.control = true;
 
-                if(t.accept) {
-                    atomicOp!"+="(this.execCount, 1.as!size_t);
-                    this.exec(t);
-                }
+                if(t.accept) this.exec(t);
             }       
 
             // creating and starting all frozen ticks
-            foreach(tm; this.meta.ticks) {
-                atomicOp!"+="(this.execCount, 1.as!size_t);
-            	this.exec(this.pop(tm));
-            }
-
+            foreach(tm; this.meta.ticks)
+                this.exec(this.pop(tm));
+            
             // all frozen ticks are ticking -> empty store
             this.meta.ticks = TickMeta[].init;
         }
@@ -711,9 +666,7 @@ private class Entity : StateMachine!SystemState {
         import std.algorithm.iteration : filter;
         import std.range : empty;
 
-        // waiting for all regular ticks to finish
-        while(atomicOp!"!="(this.execCount, 0.as!size_t))
-            Thread.sleep(5.msecs);
+        this.ops.join();
 
         synchronized(this.meta.writer) {
             // invoking OnFreezing ticks
@@ -724,16 +677,11 @@ private class Entity : StateMachine!SystemState {
                 if(e.control)
                     t.meta.control = true;
 
-                if(t.accept) {
-                    atomicOp!"+="(this.execCount, 1.as!size_t);
-                    this.exec(t);
-                }
+                if(t.accept) this.exec(t);
             } 
         }
 
-        // waiting for all OnFreezing ticks to finish
-        while(atomicOp!"!="(this.execCount, 0.as!size_t))
-            Thread.sleep(5.msecs);
+        this.ops.join();
     }
 
     @property string fsmeta() {
@@ -749,7 +697,7 @@ private class Entity : StateMachine!SystemState {
             this.meta.damages ~= thr.damage;
 
         // entity cannot operate in damaged state
-        this.asyncOp(&this.freeze); // async for avoiding deadlock
+        this.space.ops.async(this.space.ctlProc, &this.freeze); // async for avoiding deadlock
     }
 
     /// adds data to context and returns its typed index
@@ -1305,15 +1253,15 @@ abstract class Channel {
 
 /// allows signals from one space to get shipped to other spaces
 abstract class Junction : StateMachine!JunctionState {
-    private import std.parallelism : taskPool, task;
-
     private JunctionMeta _meta;
     private Space _space;
     private string[] destinations;
     private Crypto crypto;
     private ubyte[] _auth;
+    private Operator _ops;
 
-    final @property Processor proc() {return this._space.proc;}
+    final @property Processor proc() {return this._space.ctlProc;}
+    final @property Operator ops() {return this._ops;}
     protected @property JunctionMeta meta() {return this._meta;}
     @property string space() {return this._space.meta.id;}
 
@@ -1335,12 +1283,15 @@ abstract class Junction : StateMachine!JunctionState {
 
     /// ctor
     this() {
+        this._ops = new Operator;
         super();
     }
     
     void dispose() {
         if(this.state != JunctionState.Attached)
             this.detach();
+
+        this.ops.join();
         
         this.destroy;
     }
@@ -1380,6 +1331,7 @@ abstract class Junction : StateMachine!JunctionState {
         switch(n) {
             case JunctionState.Detached:
             if(this.meta) {
+                this.ops.join();
                 this.down();
                 this.deinitCrypto();
             }
@@ -1414,7 +1366,7 @@ abstract class Junction : StateMachine!JunctionState {
                 if(s.allowed(this.meta.info, c.other)) {
                     // it gets done async returns true
                     if(this.meta.info.indifferent) {
-                        taskPool.put(task(&c.push, s));
+                        this.ops.async(this.proc, {c.push(s);});
                         return true;
                     } else {
                         return c.push(s);
@@ -1431,7 +1383,7 @@ abstract class Junction : StateMachine!JunctionState {
             /* do not allow measuring of runtimes timings
             ==> make the call async and dada */
             if(this.meta.info.hiding) {
-                taskPool.put(task(&this.route, s));
+                this.ops.async(this.proc, {this.route(s);});
                 return true;
             } else
                 return this.route(s);
@@ -1557,9 +1509,9 @@ class Space : StateMachine!SystemState {
 
     private SpaceMeta meta;
     private Process process;
-    private Processor proc;
 
-    shared size_t opCount; // counting async operations
+    Operator ops;
+    private Processor actProc, ctlProc;
 
     private Junction[UUID] junctions;
     private Entity[string] entities;
@@ -1570,6 +1522,8 @@ class Space : StateMachine!SystemState {
     }
 
     private this(Process p, SpaceMeta m) {
+        this.ops = new Operator;
+
         this.meta = m;
         this.process = p;
 
@@ -1583,10 +1537,6 @@ class Space : StateMachine!SystemState {
         if(this.state == SystemState.Ticking)
             this.freeze();
 
-        // waiting for all internal operations to finish
-        while(atomicOp!"!="(this.opCount, 0))
-            Thread.sleep(5.msecs);
-
         foreach(i, j; this.junctions) {
             j.detach();
             j.dispose(); GC.free(&j);
@@ -1596,7 +1546,8 @@ class Space : StateMachine!SystemState {
             e.dispose(); GC.free(&e);
         }
 
-        this.proc.stop();
+        this.ops.join();
+        this.ctlProc.stop();
 
         this.destroy;
     }
@@ -1611,17 +1562,6 @@ class Space : StateMachine!SystemState {
     void tick() {
         if(this.state != SystemState.Ticking)
             this.state = SystemState.Ticking;
-    }
-
-    void asyncOp(void delegate() f) {
-        import std.parallelism : taskPool, task;
-
-        atomicOp!"+="(this.opCount, 1.as!size_t);
-        taskPool.put(task((){
-            scope(exit)
-                atomicOp!"-="(this.opCount, 1.as!size_t);
-            f();
-        }));
     }
 
     override protected bool onStateChanging(SystemState o, SystemState n) {
@@ -1640,7 +1580,7 @@ class Space : StateMachine!SystemState {
                 this.onTicking();
                 break;
             case SystemState.Frozen:
-                if(this.proc is null)
+                if(this.ctlProc is null)
                     this.onCreated();
                 else
                     this.onFrozen();
@@ -1652,12 +1592,12 @@ class Space : StateMachine!SystemState {
     private void onCreated() {
         import flow.core.gears.error : SpaceException;
 
-        // creating processor;
+        // creating control processor;
         // default is one core
-        if(this.meta.pipes < 1)
-            this.meta.pipes = 1;
-        this.proc = new Processor(this.meta.pipes);
-        this.proc.start();
+        if(this.meta.ctlPipes < 1)
+            this.meta.ctlPipes = 1;
+        this.ctlProc = new Processor(this.meta.ctlPipes);
+        this.ctlProc.start();
 
         // creating junctions
         foreach(jm; this.meta.junctions) {
@@ -1688,6 +1628,13 @@ class Space : StateMachine!SystemState {
         }
     }
     private void onTicking() {
+        // creating actuality processor;
+        // default is one core
+        if(this.meta.actPipes < 1)
+            this.meta.actPipes = 1;
+        this.actProc = new Processor(this.meta.actPipes);
+        this.actProc.start();
+
         foreach(e; this.entities)
             e.tick();
     }
@@ -1696,6 +1643,9 @@ class Space : StateMachine!SystemState {
         // freezing happens backwards
         foreach_reverse(e; this.entities.values)
             e.freeze();
+
+        this.actProc.stop();
+        this.actProc = null;
     }
 
     /// snapshots whole space (deep snap)
@@ -2090,24 +2040,34 @@ class Process {
     private ReadWriteMutex lock;
     private Space[string] spaces;
 
+    Operator ops;
+    private Processor ctlProc;
+
     private ProcessConfig cfg;
 
     /// ctor
     this(ProcessConfig cfg = null) {
         this.lock = new ReadWriteMutex();
-        this.config(cfg);
+        this.ops = new Operator;
+        
+        this.create(cfg);
     }
+    
 /** processes root path in filesystem
     if not set for
         * linux its ~/.local/share/flow
         * window its %APPDATA%\flow */
-    private void config(ProcessConfig cfg) {
+    private void create(ProcessConfig cfg) {
         import std.conv : to;
         import std.file : exists;
         import std.path : expandTilde, buildPath;
+        import std.parallelism : totalCPUs;
 
         if(cfg is null)
             cfg = new ProcessConfig;
+
+        if(cfg.ctlPipes < 1)
+            cfg.ctlPipes = totalCPUs - 1;
 
         if(
             cfg.fsroot == string.init ||
@@ -2123,6 +2083,13 @@ class Process {
             }
         }
 
+        // creating control processor;
+        // default is one core
+        if(cfg.ctlPipes < 1)
+            cfg.ctlPipes = 1;
+        this.ctlProc = new Processor(cfg.ctlPipes);
+        this.ctlProc.start();
+
         this.cfg = cfg;
     }
 
@@ -2132,6 +2099,9 @@ class Process {
         foreach(k, s; this.spaces) {
             s.dispose(); GC.free(&s);
         }
+
+        this.ops.join();
+        this.ctlProc.stop();
 
         this.destroy;
     }
@@ -2187,10 +2157,11 @@ class Process {
 }
 
 /// creates space metadata
-SpaceMeta createSpace(string id, size_t pipes = 1) {
+SpaceMeta createSpace(string id, ulong actPipes = 1, ulong ctlPipes = 1) {
     auto sm = new SpaceMeta;
     sm.id = id;
-    sm.pipes = pipes;
+    sm.actPipes = actPipes;
+    sm.ctlPipes = ctlPipes;
 
     return sm;
 }
@@ -2527,12 +2498,11 @@ unittest { test.header("gears.engine: first level error handling");
 
     auto spc = proc.add(sm);
 
-    // do not trigger test runner by writing error messages to stdout
     auto origLL = Log.level;
     Log.level = LL.Message;
     spc.tick();
 
-    Thread.sleep(10.msecs); // exceptionhandling takes quite a while
+    Thread.sleep(10.msecs);
     Log.level = origLL;
 
     assert(spc.get(em.ptr.id).state == SystemState.Frozen, "entity isn't frozen");
@@ -2547,7 +2517,6 @@ unittest { test.header("gears.engine: second level -> damage error handling");
     import flow.core.util;
     import std.range;
     
-
     auto proc = new Process;
     scope(exit) proc.dispose();
 
@@ -2559,12 +2528,11 @@ unittest { test.header("gears.engine: second level -> damage error handling");
 
     auto spc = proc.add(sm);
 
-    // do not trigger test runner by writing error messages to stdout
     auto origLL = Log.level;
     Log.level = LL.Message;
     spc.tick();
 
-    Thread.sleep(10.msecs); // exceptionhandling takes quite a while
+    Thread.sleep(10.msecs);
     Log.level = origLL;
 
     assert(spc.get(em.ptr.id).state == SystemState.Frozen, "entity isn't frozen");

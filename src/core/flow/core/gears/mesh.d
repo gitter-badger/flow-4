@@ -5,7 +5,6 @@ private import core.thread;
 private import flow.core.data;
 private import flow.core.gears.data;
 private import flow.core.gears.engine;
-private import flow.core.gears.proc;
 private import flow.core.util;
 private import std.array;
 private import std.string;
@@ -119,6 +118,7 @@ abstract class MeshConnector {
     final @property ubyte[IDLENGTH] id() {return this._junction.id;}
     final @property string addr() {return this._junction.meta.info.as!MeshJunctionInfo.addr;}
     final @property JunctionInfo junction() {return this._junction.meta.info.snap;}
+    final @property Operator ops() {return this._junction.ops;}
     final @property Processor proc() {return this._junction.proc;}
 
     @property MeshConnectorMeta meta() {return this._junction.meta.conn;}
@@ -573,21 +573,21 @@ class InProcessConnector : MeshConnector {
     private void recv() {
         this.canRecv = true;
 
+        auto r = {atomicOp!"-="(this.recvCount, 1.as!size_t);};
+        auto f = (MsgData msg) {
+            scope(exit) r();
+            this.handle(msg);
+        };
+
         this.recvThread = new Thread({
             while(this.canRecv) {
                 atomicOp!"+="(this.recvCount, 1.as!size_t);
-                auto f = (MsgData msg) {
-                    scope(exit) 
-                        atomicOp!"-="(this.recvCount, 1.as!size_t);
-                    this.handle(msg);
-                };
-                this.recv(f, {atomicOp!"-="(this.recvCount, 1.as!size_t);});
+                this.recv(f, r);
             }
         }).start();
     }
 
     private void recv(void delegate(MsgData) f, void delegate() err) {
-        import std.parallelism : taskPool, task;
         import std.range : front, popFront, empty;
 
         MsgData msg;
@@ -597,9 +597,9 @@ class InProcessConnector : MeshConnector {
                     msg = queues[this.addr][this.id].front;
                     queues[this.addr][this.id].popFront;
                     
-                    if(this.id != msg.src) { // ignore from own
-                        taskPool.put(task(f, msg));
-                    } else err();
+                    if(this.id != msg.src) // ignore from own
+                        this.ops.async(this.proc, {f(msg);});
+                    else err();
                 } else {Thread.sleep(5.msecs); err();}
             }
     }

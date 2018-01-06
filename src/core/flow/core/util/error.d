@@ -13,7 +13,7 @@ mixin template error() {
 
 /// mixin allowing to derrive from FlowException
 mixin template exception() {
-    private import flow.core.data.engine : Data;
+    private import flow.core.data.base : Data;
     private import flow.core.util.traits : fqn;
 
     override @property string type() {return fqn!(typeof(this));}
@@ -34,7 +34,7 @@ class FlowError : Error {
 
 /// smart exception knowing its type and storing context data
 class FlowException : Exception {
-    private import flow.core.data.engine : Data;
+    private import flow.core.data.base : Data;
 
     /// type name
 	abstract @property string type();

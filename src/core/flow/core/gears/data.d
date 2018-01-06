@@ -4,7 +4,7 @@ module flow.core.gears.data;
 string[int] aa;
 pragma(msg, getAAValueType!(typeof(aa)));*/
 
-private import flow.core.data.engine;
+private import flow.core.data.base;
 private import flow.core.data.data;
 
 /// data representing a signal
@@ -63,8 +63,11 @@ class SpaceMeta : Data { mixin _data;
     /// identifier of the space
     @field string id;
     
-    /// amount of pipes threads for executing ticks
-    @field ulong pipes;
+    /// amount of processing pipes for executing actuality
+    @field ulong actPipes;
+    
+    /// amount of processing pipes for executing control
+    @field ulong ctlPipes;
 
     /// junctions allow signals to get shipped across spaces
     @field JunctionMeta[] junctions;
@@ -214,6 +217,9 @@ class FileInfo : Data { mixin _data;
 
 /// configuration of process
 class ProcessConfig : Data { mixin _data;
+    /// amount of processing pipes for executing control
+    @field ulong ctlPipes;
+
     /** processes root path in filesystem
     if not set or not accessible for
         * posix its ~/.local/share/flow

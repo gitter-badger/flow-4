@@ -1,10 +1,11 @@
 module flow.ipc.nanomsg.mesh;
 
+private import core.atomic;
 private import core.stdc.errno;
-version(Windows) immutable ETIMEDOUT = 138;
-//version(Windows) import core.sys.windows.winsock2;
 private import core.thread;
 private import flow.core;
+
+version(Windows) immutable ETIMEDOUT = 138;
 
 extern(C)
 {
@@ -47,7 +48,7 @@ class NanoMsgConnector : MeshConnector {
     private int busSock;
     private int pullSock; // inbound
 
-    private ReadWriteMutex recvLock;
+    private shared size_t recvCount;
     private Mutex sendBusLock;
 
     private bool canRecv;
@@ -61,12 +62,6 @@ class NanoMsgConnector : MeshConnector {
 
     /// ctor
     this() {
-        /*
-        t.job = Job(&t.exec, &t.catchError, t.meta.time);
-            this.space.proc.run(&t.job);
-        */
-
-        this.recvLock = new ReadWriteMutex();
         this.sendBusLock = new Mutex;
         super();
     }
@@ -104,8 +99,11 @@ class NanoMsgConnector : MeshConnector {
     }
 
     protected override void unlisten() {
-        synchronized(this.recvLock.writer)
-            this.canRecv = false;
+        this.canRecv = false;
+
+        // waiting for all recvs operations to finish
+        while(atomicOp!"!="(this.recvCount, 0.as!size_t))
+            Thread.sleep(5.msecs);
 
         foreach(d; this.dests)
             this.close(d.pushSock);
@@ -262,25 +260,25 @@ class NanoMsgConnector : MeshConnector {
     private void recv() {
         this.canRecv = true;
 
+        auto r = {atomicOp!"-="(this.recvCount, 1.as!size_t);};
+        auto f = (ubyte[] pkg) {
+            scope(exit) r();
+            this.handle(pkg);
+        };
+
         this.recvBusThread = new Thread({
             thread_detachThis;
-            while(this.canRecv && this.recvLock.reader.tryLock()) {
-                this.recv(this.busSock, (pkg) {
-                    scope(exit) 
-                        this.recvLock.reader.unlock();
-                    this.handle(pkg);
-                }, &this.recvLock.reader.unlock);
+            while(this.canRecv) {
+                atomicOp!"+="(this.recvCount, 1.as!size_t);
+                this.recv(this.busSock, f, r);
             }
         }).start();
 
         this.recvPullThread = new Thread({
             thread_detachThis;
-            while(this.canRecv && this.recvLock.reader.tryLock()) {
-                this.recv(this.pullSock, (pkg) {
-                    scope(exit) 
-                        this.recvLock.reader.unlock();
-                    this.handle(pkg);
-                }, &this.recvLock.reader.unlock);
+            while(this.canRecv) {
+                atomicOp!"+="(this.recvCount, 1.as!size_t);
+                this.recv(this.pullSock, f, r);
             }
         }).start();
     }
@@ -302,7 +300,6 @@ class NanoMsgConnector : MeshConnector {
     private void recv(int sock, void delegate(ubyte[]) f, void delegate() err) {
         import std.conv : to;
         import std.digest : toHexString;
-        import std.parallelism : taskPool, task;
 
         void* buf;
         int rc = nn_recv (sock, &buf, NN_MSG, 0);
@@ -312,7 +309,7 @@ class NanoMsgConnector : MeshConnector {
             debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") recv "~rc.to!string~" bytes via "~sock.to!string);
             scope(exit) nn_freemsg (buf);
             auto pkg = buf.as!(ubyte*)[0..rc].as!(ubyte[]).dup;
-            taskPool.put(task(f, pkg));
+            this.ops.async(this.proc, {f(pkg);});
         } else {
             if(errno == EBADF) {
                 debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") recv failed because of invalid socket: "~nn_err_strerror (errno).to!string~"["~errno.to!string~"]");
