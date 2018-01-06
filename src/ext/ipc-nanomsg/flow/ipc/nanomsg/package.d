@@ -1,3 +1,3 @@
 module flow.ipc.nanomsg;
 
-public import flow.ipc.nanomsg.mesh;
+public import flow.ipc.nanomsg.meshconn;

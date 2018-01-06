@@ -142,6 +142,7 @@ class MeshJunctionMeta : JunctionMeta { mixin _data;
     @field ulong timeout;
     @field ulong ackTimeout;
     @field ulong ackInterval;
+    @field ulong pipes;
 
     @field MeshConnectorMeta conn;
 }

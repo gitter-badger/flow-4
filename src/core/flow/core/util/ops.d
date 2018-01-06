@@ -13,7 +13,11 @@ final class Operator {
     @property count() {return atomicLoad!(MemoryOrder.raw)(this._count);}
     @property empty() {return atomicOp!"=="(this._count, 0.as!size_t);}
 
-    void release() {
+    void checkout() {
+        atomicOp!"+="(this._count, 1.as!size_t);
+    }
+
+    void checkin() {
         atomicOp!"-="(this._count, 1.as!size_t);
     }
 
@@ -25,13 +29,13 @@ final class Operator {
         import std.stdio : writeln;
         import std.parallelism : taskPool, task;
         
-        atomicOp!"+="(this._count, 1.as!size_t);
+        this.checkout();
         auto job = new Job({
             f();
-            this.release();
+            this.checkin();
         }, (Throwable thr){
             scope(exit)
-                this.release();
+                this.checkin();
             e(thr);
         }, time);
         proc.run(job);

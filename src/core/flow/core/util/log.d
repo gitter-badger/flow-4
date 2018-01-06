@@ -10,6 +10,10 @@ enum LL {
     FDebug = 6
 }
 
+interface ILogable  {
+    @property string logPrefix();
+}
+
 /// flow system logger
 final class Log {
     private import flow.core.data.base : Data;
@@ -99,6 +103,45 @@ final class Log {
             } else str ~= Log.get(dIn);
             Log.print(level, str);
         }
+    }
+
+    /// log a message
+    public static void msg(LL level, ILogable ctx, string msg) {
+        import flow.core.util.traits : as;
+        Log.msg(level, ctx.logPrefix~": "~msg);
+    }
+
+    /// log a message coming with an error or exception
+    public static void msg(LL level, ILogable ctx, string msg, Throwable thr) {
+        import flow.core.util.traits : as;
+        Log.msg(level, ctx.logPrefix~": "~msg, thr);
+    }
+    
+    /// log a message coming with context data
+    public static void msg(DT)(LL level, ILogable ctx, string msg, DT dIn) if(is(DT : Data) || (isArray!DT && is(ElementType!DT:Data))) {
+        Log.msg(level, ctx.logPrefix~": "~msg, dIn);
+    }
+
+    /// log an error or exception
+    public static void msg(LL level, ILogable ctx, Throwable thr) {
+        import flow.core.util.traits : as;
+
+        Log.msg(level, ctx.logPrefix, thr);
+    }
+
+    /// log an error or exception coming with context data
+    public static void msg(DT)(LL level, ILogable ctx, Throwable thr, DT dIn) if(is(DT : Data) || (isArray!DT && is(ElementType!DT:Data))) {
+        Log.msg(level, ctx.logPrefix, thr, dIn);
+    }
+
+    /// log a data object
+    public static void msg(DT)(LL level, ILogable ctx, DT dIn) if(is(DT : Data) || (isArray!DT && is(ElementType!DT:Data))) {
+        Log.msg(level, ctx.logPrefix, dIn);
+    }
+
+    /// log a message coming with an error or exception and context data
+    public static void msg(DT)(LL level, ILogable ctx, string msg, Throwable thr, DT dIn) if(is(DT : Data) || (isArray!DT && is(ElementType!DT:Data))) {
+        Log.msg(level, ctx.logPrefix~": "~msg, thr, dIn);
     }
 
     private static void print(LL level, string msg) {

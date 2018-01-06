@@ -62,7 +62,7 @@ private class MeshChannel : Channel {
 
     private ubyte[] info;
     private bool passive;
-    
+
     Mutex cfrmLock;
     bool[ulong] awaitCfrm;
     bool[ulong] cfrms;
@@ -81,6 +81,7 @@ private class MeshChannel : Channel {
         import std.digest.md : md5Of;
 
         this.cfrmLock = new Mutex;
+
         this.id[0..IDLENGTH] = dst.md5Of.dup;
         this._auth = auth;
         this.info = info;
@@ -91,41 +92,48 @@ private class MeshChannel : Channel {
     override protected void dispose() {
         while(this.awaitCfrm.length > 0)
             Thread.sleep(5.msecs);
+
+        super.dispose();
     }
     
     override protected bool reqVerify() {
         import std.conv : to;
-        
         auto msgId = MsgData.getNewId;
-        debug Log.msg(LL.Debug, this.logPrefix~"request verification("~msgId.to!string~")");
+        debug Log.msg(LL.Debug, this, "request verification("~msgId.to!string~")");
+
         return this.own.confirmedSend(MsgData(this.id, this.own.id,
             MsgCode.Verify, msgId), this);
     }
 
     override protected bool transport(ref ubyte[] pkg) {
         import std.conv : to;
-
         auto msgId = MsgData.getNewId;
-        debug Log.msg(LL.Debug, this.logPrefix~"transport("~msgId.to!string~")");
+        debug Log.msg(LL.Debug, this, "transport("~msgId.to!string~")");
+
         return this.own.confirmedSend(MsgData(this.id, this.own.id, 
             MsgCode.Signal, msgId, pkg), this);
     }
 }
 
-abstract class MeshConnector {
+abstract class MeshConnector : ILogable {
     private MeshJunction _junction;
+
     final @property ubyte[IDLENGTH] sysId() {return this._junction.sysId;}
     final @property ubyte[IDLENGTH] id() {return this._junction.id;}
     final @property string addr() {return this._junction.meta.info.as!MeshJunctionInfo.addr;}
     final @property JunctionInfo junction() {return this._junction.meta.info.snap;}
-    final @property Operator ops() {return this._junction.ops;}
     final @property Processor proc() {return this._junction.proc;}
+    final @property Operator ops() {return this._junction.ops;}
 
     @property MeshConnectorMeta meta() {return this._junction.meta.conn;}
 
-    protected abstract @property ubyte[] info();
+    @property string logPrefix() {
+        import std.conv : to;
+        import std.digest : toHexString;
+        return "connector("~this.id.toHexString.to!string~")";
+    }
 
-    this() {}
+    protected abstract @property ubyte[] info();
 
     protected abstract bool create();
 
@@ -155,10 +163,17 @@ private class MeshJunction : Junction {
 
     private bool[ulong] acks;
 
+    private ContextMutex!(ubyte[IDLENGTH]) pLock;
     private ReadWriteMutex cLock;
     private MeshChannel[ubyte[IDLENGTH]] channels;
 
     private MeshConnector conn;
+
+    private Processor _proc;
+    private Operator _ops;
+
+    final @property Processor proc() {return this._proc;}
+    final @property Operator ops() {return this._ops;}
 
     override @property MeshJunctionMeta meta() {
         return super.meta.as!MeshJunctionMeta;
@@ -173,7 +188,9 @@ private class MeshJunction : Junction {
 
     /// ctor
     this() {
+        this.pLock = new ContextMutex!(ubyte[IDLENGTH]);
         this.cLock = new ReadWriteMutex();
+        this._ops = new Operator;
         super();
     }
 
@@ -198,14 +215,14 @@ private class MeshJunction : Junction {
             foreach_reverse(f; failed)
                 this.meta.known = this.meta.known.remove(f);
 
-            Log.msg(LL.Message, this.logPrefix~this.meta.info.space~" joined mesh as "~this.id.toHexString.to!string);
+            Log.msg(LL.Message, this, this.meta.info.space~" joined mesh as "~this.id.toHexString.to!string);
 
             // ping
             this.sendPing();
             
             return true;
         } catch(Throwable thr) {
-            debug Log.msg(LL.Error, this.logPrefix~"joining mesh failed", thr);
+            debug Log.msg(LL.Error, this, "joining mesh failed", thr);
             return false;
         }
     }
@@ -220,30 +237,45 @@ private class MeshJunction : Junction {
 
     private void sendCfrm(MsgData msg, bool accepted, MeshChannel c) {
         import std.conv : to;
+        import std.digest : toHexString;
+        
         debug {
             if(accepted)
-                Log.msg(LL.Debug, this.logPrefix~"accepting("~msg.id.to!string~")");
+                Log.msg(LL.Debug, this, "accepting("~msg.id.to!string~")");
             else
-                Log.msg(LL.Debug, this.logPrefix~"refusing("~msg.id.to!string~")");
+                Log.msg(LL.Debug, this, "refusing("~msg.id.to!string~")");
         }
         this.conn.send(MsgData(msg.src, this.id, MsgCode.Cfrm, msg.id,
             [accepted ? 1 : 0]));
+
+        debug Log.msg(LL.Debug, this, "cfrm("~msg.id.to!string~") sent to "~msg.src.toHexString.to!string);
     }
 
     private void sendPing() {
         import msgpack : pack;
+        import std.conv : to;
+        
         auto addr = this.meta.info.as!MeshJunctionInfo.addr;
-        this.conn.send(MsgData(this.sysId, this.id, MsgCode.Ping, MsgData.getNewId, addr.pack));
+        auto msg = MsgData(this.sysId, this.id, MsgCode.Ping, MsgData.getNewId, addr.pack);
+        this.conn.send(msg);
+
+        debug Log.msg(LL.Debug, this, "ping("~msg.id.to!string~") sent");
     }
 
     private void sendInfo(ubyte[IDLENGTH] dst, ulong id = MsgData.getNewId) {
         import msgpack : pack;
+        import std.conv : to;
+        import std.digest : toHexString;
+
         InfoData d;
         d.space = this.meta.info.space;
         d.addr = this.meta.info.as!MeshJunctionInfo.addr;
         d.info = this.conn.info;
         d.auth = this.auth;
-        this.conn.send(MsgData(dst, this.id, MsgCode.Info, id, d.pack));
+        auto msg = MsgData(dst, this.id, MsgCode.Info, id, d.pack);
+        this.conn.send(msg);
+
+        debug Log.msg(LL.Debug, this, "info("~msg.id.to!string~") sent to "~dst.toHexString.to!string);
     }
 
     private bool confirmedSend(MsgData msg, MeshChannel c) {
@@ -252,34 +284,31 @@ private class MeshJunction : Junction {
         import std.datetime.systime : Clock;
 
         if(!this.meta.info.indifferent) {
-            // channel should persist until answer came or timeout
-            synchronized(this.cLock.reader) {
+            synchronized(c.cfrmLock)
+                c.awaitCfrm[msg.id] = true;
+            scope(exit)
+                c.awaitCfrm.remove(msg.id);
+            
+            auto timeout = this.meta.as!MeshJunctionMeta.timeout;
+            auto time = Clock.currStdTime;
+            if(!this.conn.send(msg)) return false;
+            
+            bool arrived;
+            do {
                 synchronized(c.cfrmLock)
-                    c.awaitCfrm[msg.id] = true;
-                scope(exit)
-                    c.awaitCfrm.remove(msg.id);
-                
-                auto timeout = this.meta.as!MeshJunctionMeta.timeout;
-                auto time = Clock.currStdTime;
-                if(!this.conn.send(msg)) return false;
-                
-                bool arrived;
-                do {
-                    synchronized(c.cfrmLock)
-                        arrived = (msg.id in c.cfrms) ? true : false;
-                    if(!arrived)
-                        Thread.sleep(5.msecs);
-                } while(!arrived && time + timeout.msecs.total!"hnsecs" > Clock.currStdTime);
-                
-                debug Log.msg(LL.Debug, c.logPrefix~"waited "~(Clock.currStdTime-time).to!string~" hnsecs for answer("~msg.id.to!string~")");
+                    arrived = (msg.id in c.cfrms) ? true : false;
+                if(!arrived)
+                    Thread.sleep(5.msecs);
+            } while(!arrived && time + timeout.msecs.total!"hnsecs" > Clock.currStdTime);
+            
+            debug Log.msg(LL.Debug, this, "waited "~(Clock.currStdTime-time).to!string~" hnsecs for answer("~msg.id.to!string~")");
 
-                if(arrived) synchronized(c.cfrmLock) {                    
-                    scope(exit) c.cfrms.remove(msg.id);
-                    return c.cfrms[msg.id];
-                } else {
-                    Log.msg(LL.Warning, this.logPrefix~"cfrm timeout("~msg.id.to!string~") ");
-                    return false;
-                }
+            if(arrived) synchronized(c.cfrmLock) {                    
+                scope(exit) c.cfrms.remove(msg.id);
+                return c.cfrms[msg.id];
+            } else {
+                Log.msg(LL.Warning, this, "cfrm timeout("~msg.id.to!string~") ");
+                return false;
             }
         } else
             return this.conn.send(msg);
@@ -287,9 +316,10 @@ private class MeshJunction : Junction {
 
     private void handle(MsgData msg) {
         import std.conv : to;
-        // handle message only if its for self
-        if(msg.dst == this.sysId || msg.dst == this.id) {
-            try {
+
+        try {
+            // handle message only if its for self
+            if(msg.dst == this.sysId || msg.dst == this.id) {
                 switch(msg.code) {
                     case MsgCode.Ping:
                         this.onPing(msg);
@@ -313,10 +343,11 @@ private class MeshJunction : Junction {
                         this.onDefault(msg);
                         break;
                 }
-            } catch(Throwable thr) {
-                Log.msg(LL.Error, this.logPrefix~"processing message", thr);
             }
+        } catch(Throwable thr) {
+            Log.msg(LL.Error, this, "processing message", thr);
         }
+            
     }
 
     private void onPing(MsgData msg) {
@@ -324,66 +355,92 @@ private class MeshJunction : Junction {
         import std.conv : to;
         import std.digest : toHexString;
 
-        debug Log.msg(LL.Debug, this.logPrefix~"ping("~msg.id.to!string~") from "~msg.src.toHexString.to!string);
-        
-        auto addr = msg.data.unpack!string;
-        this.contact(addr);
-        
-        synchronized(this.cLock.reader)
+        synchronized(this.pLock.get(msg.src).reader) {
+            debug Log.msg(LL.Debug, this, "ping("~msg.id.to!string~") from "~msg.src.toHexString.to!string);
+            
+            auto addr = msg.data.unpack!string;
+            this.contact(addr);
+
             this.sendInfo(msg.src, msg.id);
+        }
     }
 
     private void onInfo(MsgData msg) {
         import msgpack : unpack;
         import std.conv : to;
         import std.digest : toHexString;
-        
-        auto src = msg.src;
 
-        // if there is no channel to this junction, create one
-        auto d = msg.data.unpack!InfoData;
-        while(!this.cLock.writer.tryLock)
-            Thread.sleep(5.msecs);
-        {
-            scope(exit) this.cLock.writer.unlock();
-            if(msg.src !in this.channels) {
-                this.contact(d.addr);
-                debug Log.msg(LL.Debug, this.logPrefix~"info("~msg.id.to!string~") from "~d.space~" known as "~msg.src.toHexString.to!string);
-                auto c = new MeshChannel(d.space, this, d.info, d.auth);
-                this.register(c);
-                this.sendInfo(msg.src, msg.id);
-            }
+        synchronized(this.pLock.get(msg.src).reader) {
+            auto d = msg.data.unpack!InfoData;
+
+            this.ops.async(this.proc, {
+                synchronized(this.pLock.get(msg.src).writer) {
+                    if(this.state == JunctionState.Attached) {
+                        synchronized(this.cLock.writer) {
+                            if(msg.src in this.channels) {
+                                debug Log.msg(LL.Debug, this, "info("~msg.id.to!string~") from "~d.space~" ignoerd, I know it already");
+                            } else {
+                                debug Log.msg(LL.Debug, this, "info("~msg.id.to!string~") from "~d.space~" known as "~msg.src.toHexString.to!string);
+                                this.contact(d.addr);
+                                auto c = new MeshChannel(d.space, this, d.info, d.auth);
+                                this.register(c);
+                                this.sendInfo(msg.src, msg.id);
+                            }
+                        }
+                    } else {
+                        debug Log.msg(LL.Debug, this, "info("~msg.id.to!string~") from "~d.space~" ignoerd, junction is detaching");
+                    }
+                }
+            });
         }
     }
 
-    /// if a node signs off deregister its channel
+    /// if a node signs off unregister its channel
     private void onSignOff(MsgData msg) {
         import std.conv : to;
         import std.digest : toHexString;
         
-        debug Log.msg(LL.Debug, this.logPrefix~"signoff("~msg.id.to!string~") from "~msg.src.toHexString.to!string);
-        while(!this.cLock.writer.tryLock)
-            Thread.sleep(5.msecs);
-        {
-            scope(exit) this.cLock.writer.unlock();
-            if(msg.src in this.channels)
-                this.unregister(this.channels[msg.src]);
-        }
+        this.ops.async(this.proc, {
+            auto done = false;
+            synchronized(this.pLock.get(msg.src).writer) {
+                if(this.state == JunctionState.Attached) {
+                    synchronized(this.cLock.writer) {
+                        if(msg.src in this.channels) {
+                            auto c = this.channels[msg.src];
+                            debug Log.msg(LL.Debug, this, "signoff("~msg.id.to!string~") from "~msg.src.toHexString.to!string);
+                            this.unregister(c);
+                            done = true;
+                        } else {
+                            debug Log.msg(LL.Debug, this, "signoff("~msg.id.to!string~") from "~msg.src.toHexString.to!string~" ignored, I don't know it");
+                        }
+                    }
+                } else {
+                    debug Log.msg(LL.Debug, this, "signoff("~msg.id.to!string~") from "~msg.src.toHexString.to!string~" ignored, junction is detaching");
+                }
+            }
+            if(done) this.pLock.remove(msg.src); // it might not need that mutex anymore
+        });
     }
 
     private void onVerify(MsgData msg) {
         import std.conv : to;
         import std.digest : toHexString;
         
-        debug Log.msg(LL.Debug, this.logPrefix~"verify("~msg.id.to!string~") from "~msg.src.toHexString.to!string);
-        auto r = false; MeshChannel c;
-        synchronized(this.cLock.reader) {
-            if(msg.src in this.channels) {
-                c = this.channels[msg.src];
-                r = c.verify();
+        synchronized(this.pLock.get(msg.src).reader) {
+            MeshChannel c;
+            synchronized(this.cLock.reader) {
+                if(msg.src in this.channels) {
+                    c = this.channels[msg.src];
+                    c.ops.checkout();
+                }
             }
-        
-            this.sendCfrm(msg, r, c);
+
+            if(c !is null) {
+                debug Log.msg(LL.Debug, this, "verify("~msg.id.to!string~") from "~msg.src.toHexString.to!string);
+                this.sendCfrm(msg, c.verify(), c);
+            } else {
+                debug Log.msg(LL.Debug, this, "verify("~msg.id.to!string~") from "~msg.src.toHexString.to!string~" ignored, I don't know it");
+            }
         }
     }
 
@@ -391,52 +448,73 @@ private class MeshJunction : Junction {
         import std.conv : to;
         import std.digest : toHexString;
 
-        debug Log.msg(LL.Debug, this.logPrefix~"signal("~msg.id.to!string~") from "~msg.src.toHexString.to!string);
-        
-        auto r = false; ubyte[] dst; MeshChannel c;
-        synchronized(this.cLock.reader) {
-            if(msg.src in this.channels) {
-                debug Log.msg(LL.Debug, this.logPrefix~"channel found for pull("~msg.id.to!string~") from "~msg.src.toHexString.to!string);
-                c = this.channels[msg.src];
-                r = c.pull(msg.data);
-            } else
-                debug Log.msg(LL.Debug, this.logPrefix~"channel not found for pull("~msg.id.to!string~") from "~msg.src.toHexString.to!string);
+        synchronized(this.pLock.get(msg.src).reader) {
+            MeshChannel c;
+            synchronized(this.cLock.reader) {
+                if(msg.src in this.channels) {
+                    c = this.channels[msg.src];
+                    c.ops.checkout();
+                }
+            }
 
-            this.sendCfrm(msg, r, c);
+            if(c !is null) {
+                debug Log.msg(LL.Debug, this, "signal("~msg.id.to!string~") from "~msg.src.toHexString.to!string);
+                this.sendCfrm(msg, c.pull(msg.data), c);
+            } else {
+                debug Log.msg(LL.Debug, this, "signal("~msg.id.to!string~") from "~msg.src.toHexString.to!string~" ignored, I don't know it");
+            }
         }
     }
 
     private void onCfrm(MsgData msg) {
         import std.conv : to;
+        import std.digest : toHexString;
 
-        bool answer = msg.data[0] == 1;
+        // first class handler will not wait for lock
+        synchronized(this.pLock.get(msg.src).reader) {
+            bool answer = msg.data[0] == 1;
 
-        synchronized(this.cLock.reader) {
-            debug Log.msg(LL.Debug, this.logPrefix~"notified about "~(answer ? "accepted" : "refused")~"("~msg.id.to!string~") ");
-            if(msg.src in this.channels)
-                debug Log.msg(LL.Debug, this.logPrefix~(answer ? "accepted" : "refused")~"("~msg.id.to!string~") ");
-                synchronized(this.channels[msg.src].cfrmLock) if(msg.id in this.channels[msg.src].awaitCfrm)
-                    this.channels[msg.src].cfrms[msg.id] = answer;
+            synchronized(this.cLock.reader) {
+                debug Log.msg(LL.Debug, this, "notified about "~(answer ? "accepted" : "refused")~"("~msg.id.to!string~")");
+                if(msg.src in this.channels)
+                    debug Log.msg(LL.Debug, this, (answer ? "accepted" : "refused")~"("~msg.id.to!string~") ");
+                    synchronized(this.channels[msg.src].cfrmLock) if(msg.id in this.channels[msg.src].awaitCfrm)
+                        this.channels[msg.src].cfrms[msg.id] = answer;
+            }
         }
     }
 
     private void onDefault(MsgData msg) {
-        Log.msg(LL.Error, this.logPrefix~"unknown message received");
+        import std.conv : to;
+        import std.digest : toHexString;
+
+        // first class handler will not wait for lock
+        synchronized(this.pLock.get(msg.src).reader)
+            Log.msg(LL.Error, this, "unknown("~msg.id.to!string~")");
     }
 
     /// registers a channel passing junction
-    private void register(MeshChannel c) {        
+    private void register(MeshChannel c) {
+        import std.conv : to;
+        import std.digest : toHexString;
+
         this.conn.add(c.id, c.info);
         this.channels[c.id] = c;
+        debug Log.msg(LL.Debug, this, "registered("~c.id.toHexString.to!string~")");
     }
     
     /// unregister a channel passing junction
     private void unregister(MeshChannel c) {
         import core.memory : GC;
+        import std.conv : to;
+        import std.digest : toHexString;
 
-        this.channels.remove(c.id);
-        this.conn.remove(c.id);
+        auto id = c.id;
+        this.channels.remove(id);
+        this.conn.remove(id);
         c.dispose(); GC.free(&c);
+
+        debug Log.msg(LL.Debug, this, "unregistered("~id.toHexString.to!string~")");
     }
 
     override bool up() {
@@ -444,6 +522,13 @@ private class MeshJunction : Junction {
         import std.conv : to;
         import std.digest : toHexString;
         import std.digest.md : md5Of;
+        
+        // creating processor;
+        // default is one core
+        if(this.meta.pipes < 1)
+            this.meta.pipes = 1;
+        this._proc = new Processor(this.meta.pipes);
+        this.proc.start();
 
         //this.sysId[0..IDLENGTH] = "".bin.md5Of.dup;
         this.id[0..IDLENGTH] = this.meta.info.space.md5Of.dup;
@@ -452,7 +537,7 @@ private class MeshJunction : Junction {
             this.conn._junction = this;
             bool r = false;
             try {r = this.conn.create() && this.conn.listen() && this.connect();}
-            catch(Throwable thr) {Log.msg(LL.Message, this.logPrefix~"connecting failed", thr);}
+            catch(Throwable thr) {Log.msg(LL.Message, this, "connecting failed", thr);}
             if(r) {
                 return true;
             } else {
@@ -470,13 +555,15 @@ private class MeshJunction : Junction {
         import core.memory : GC;
 
         // unregister channels
-        while(!this.cLock.writer.tryLock)
-            Thread.sleep(5.msecs);
-        {
-            scope(exit) this.cLock.writer.unlock();
-            foreach(s, c; this.channels)
-                this.unregister(c);
-        }
+        synchronized(this.cLock.writer)
+            foreach(s, c; this.channels) {
+                synchronized(this.pLock.get(c.id).writer)
+                    this.unregister(c);
+                this.pLock.remove(id); // it might not need that mutex anymore
+            }
+
+        this.ops.join();
+        this.pLock.clear();
 
         try {
             this.conn.unlisten();
@@ -489,11 +576,14 @@ private class MeshJunction : Junction {
             this.conn = null;
         }
         catch(Throwable thr) {
-            Log.msg(LL.Message, this.logPrefix~"disconnecting failed");
+            Log.msg(LL.Message, this, "disconnecting failed");
         }
+
+        this.proc.stop();
+        this._proc = null;
     }
 
-    override Channel get(string dst) {
+    override MeshChannel get(string dst) {
         import std.digest.md : md5Of;
 
         ubyte[IDLENGTH] dstId;
@@ -504,121 +594,6 @@ private class MeshJunction : Junction {
         
         return null;
     }
-}
-
-class InProcessConnector : MeshConnector {
-    private import core.sync.mutex : Mutex;
-    private import core.sync.rwmutex : ReadWriteMutex;
-
-    private __gshared static ReadWriteMutex lock;
-    private __gshared static InProcessConnector[ubyte[IDLENGTH]][string] pool;
-    private __gshared static MsgData[][ubyte[IDLENGTH]][string] queues;
-    private __gshared static Mutex[ubyte[IDLENGTH]][string] queueLocks;
-
-    shared static this() {
-        lock = new ReadWriteMutex();
-    }
-
-    private shared size_t recvCount;
-
-    private bool canRecv;
-
-    override protected @property ubyte[] info() {return null;}
-
-    /// ctor
-    this() {
-        super();
-    }
-    
-    override protected bool create() {return true;}
-
-    protected override void dispose() {
-        super.dispose();
-    }
-
-    protected override bool listen() {
-        import std.conv : to;
-        import std.digest : toHexString;
-
-        synchronized(lock.writer) {
-            pool[this.addr][this.id] = this;
-            queues[this.addr][this.id] = null;
-            queueLocks[this.addr][this.id] = new Mutex;
-        }
-
-        this.recv();
-        return true;
-    }
-
-    protected override void unlisten() {
-        this.canRecv = false;
-
-        // waiting for all recvs operations to finish
-        while(atomicOp!"!="(this.recvCount, 0.as!size_t))
-            Thread.sleep(5.msecs);
-
-        synchronized(lock.writer) {
-            pool[this.addr].remove(this.id);
-            queues[this.addr].remove(this.id);
-            queueLocks[this.addr].remove(this.id);
-        }
-    }
-
-    protected override bool connect(string bus) {        
-        return true;
-    }
-
-    private Thread recvThread;
-
-    private void recv() {
-        this.canRecv = true;
-
-        auto r = {atomicOp!"-="(this.recvCount, 1.as!size_t);};
-        auto f = (MsgData msg) {
-            scope(exit) r();
-            this.handle(msg);
-        };
-
-        this.recvThread = new Thread({
-            while(this.canRecv) {
-                atomicOp!"+="(this.recvCount, 1.as!size_t);
-                this.recv(f, r);
-            }
-        }).start();
-    }
-
-    private void recv(void delegate(MsgData) f, void delegate() err) {
-        import std.range : front, popFront, empty;
-
-        MsgData msg;
-        synchronized(lock.reader)
-            synchronized(queueLocks[this.addr][this.id]) {
-                if(!queues[this.addr][this.id].empty) {
-                    msg = queues[this.addr][this.id].front;
-                    queues[this.addr][this.id].popFront;
-                    
-                    if(this.id != msg.src) // ignore from own
-                        this.ops.async(this.proc, {f(msg);});
-                    else err();
-                } else {Thread.sleep(5.msecs); err();}
-            }
-    }
-
-    protected override bool send(MsgData msg) {
-        synchronized(lock.reader)
-            try {
-                if(msg.dst == this.sysId) {
-                    foreach(i; queues[this.addr].keys)
-                        synchronized(queueLocks[this.addr][i])
-                            queues[this.addr][i] ~= msg;
-                } else queues[this.addr][msg.dst] ~= msg;
-                return true;
-            } catch(Throwable thr) return false;
-    }
-
-    protected override void add(ubyte[IDLENGTH] dst, ubyte[] info) { }
-
-    protected override void remove(ubyte[IDLENGTH] dst) { }
 }
 
 /// creates metadata for an in process junction and appeds it to a spaces metadata 
@@ -685,66 +660,3 @@ JunctionMeta createMeshJunction(
 
     return jm;
 }
-
-unittest { test.header("gears.mesh: fully enabled passing of signals via InProcessConnector");
-    import core.thread;
-    import flow.core.util;
-    import std.uuid;
-
-    auto proc = new Process;
-    scope(exit)
-        proc.dispose();
-
-    //Log.level = LL.Debug;
-
-    auto spc1Domain = "spc1.test.inproc.gears.core.flow";
-    auto spc2Domain = "spc2.test.inproc.gears.core.flow";
-
-    auto junctionId = randomUUID;
-
-    auto sm1 = createSpace(spc1Domain);
-    auto ems = sm1.addEntity("sending");
-    auto a = new TestSendingAspect; ems.aspects ~= a;
-    a.wait = 3;
-    a.dstEntity = "receiving";
-    a.dstSpace = spc2Domain;
-    ems.addTick(fqn!UnicastSendingTestTick);
-    ems.addTick(fqn!AnycastSendingTestTick);
-    ems.addTick(fqn!MulticastSendingTestTick);
-    auto conn1 = new MeshConnectorMeta;
-    conn1.type = fqn!InProcessConnector;
-    sm1.addMeshJunction(junctionId, "junction", [], conn1, 50);
-
-    auto sm2 = createSpace(spc2Domain);
-    auto emr = sm2.addEntity("receiving");
-    emr.aspects ~= new TestReceivingAspect;
-    emr.addReceptor(fqn!TestUnicast, fqn!UnicastReceivingTestTick);
-    emr.addReceptor(fqn!TestAnycast, fqn!AnycastReceivingTestTick);
-    emr.addReceptor(fqn!TestMulticast, fqn!MulticastReceivingTestTick);
-    auto conn2 = new MeshConnectorMeta;
-    conn2.type = fqn!InProcessConnector;
-    sm2.addMeshJunction(junctionId, "junction", [], conn2, 50);
-    
-    auto spc1 = proc.add(sm1);
-    auto spc2 = proc.add(sm2);
-
-    // 2 before 1 since 2 must be up when 1 begins
-    spc2.tick();
-    spc1.tick();
-
-    Thread.sleep(100.msecs);
-
-    spc2.freeze();
-    spc1.freeze();
-
-    auto nsm1 = spc1.snap();
-    auto nsm2 = spc2.snap();
-
-    assert(nsm2.entities[0].aspects[0].as!TestReceivingAspect.unicast !is null, "didn't get test unicast");
-    assert(nsm2.entities[0].aspects[0].as!TestReceivingAspect.anycast !is null, "didn't get test anycast");
-    assert(nsm2.entities[0].aspects[0].as!TestReceivingAspect.multicast !is null, "didn't get test multicast");
-
-    assert(nsm1.entities[0].aspects[0].as!TestSendingAspect.unicast, "didn't confirm test unicast");
-    assert(nsm1.entities[0].aspects[0].as!TestSendingAspect.anycast, "didn't confirm test anycast");
-    assert(nsm1.entities[0].aspects[0].as!TestSendingAspect.multicast, "didn't confirm test multicast");
-test.footer(); }

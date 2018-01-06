@@ -14,7 +14,7 @@ enum SystemState {
 }
 
 /// represents a definded change in systems information
-abstract class Tick {
+abstract class Tick : ILogable {
     private import core.atomic : atomicOp, atomicLoad, MemoryOrder;
     private import core.time : Duration;
     private import flow.core.data : Data;
@@ -27,18 +27,23 @@ abstract class Tick {
 
     private Throwable thr;
 
-    protected @property TickInfo info() {return this.meta.info !is null ? this.meta.info.snap : null;}
-    protected @property Signal trigger() {return this.meta.trigger !is null ? this.meta.trigger.snap : null;}
-    protected @property TickInfo previous() {return this.meta.previous !is null ? this.meta.previous.snap : null;}
-    protected @property Data data() {return this.meta.data;}
-    protected @property size_t count() {
+    protected final @property TickInfo info() {return this.meta.info !is null ? this.meta.info.snap : null;}
+    protected final @property Signal trigger() {return this.meta.trigger !is null ? this.meta.trigger.snap : null;}
+    protected final @property TickInfo previous() {return this.meta.previous !is null ? this.meta.previous.snap : null;}
+    protected final @property Data data() {return this.meta.data;}
+    protected final @property size_t count() {
         return this.meta.control ? atomicLoad!(MemoryOrder.raw)(this.entity.count) : size_t.init;
     }
 
     /** context of hosting entity
     warning you have to sync it as reader when accessing it reading
     and as writer when accessing it writing */
-    protected T aspect(T)(size_t i = 0) if(is(T:Data)) {return this.entity.get!T(i);}
+    protected final T aspect(T)(size_t i = 0) if(is(T:Data)) {return this.entity.get!T(i);}
+
+    @property string logPrefix() {
+        import std.conv : to;
+        return "tick@entity("~this.entity.meta.ptr.addr~")";
+    }
 
     /// check if execution of tick is accepted
     @property bool accept() {return true;}
@@ -64,16 +69,16 @@ abstract class Tick {
         atomicOp!"+="(this.entity.count, 1.as!size_t);
 
         // run tick
-        Log.msg(LL.FDebug, this.logPrefix~"running tick", this.meta);
+        Log.msg(LL.FDebug, this, "running tick", this.meta);
         try {
             this.run();
-            Log.msg(LL.FDebug, this.logPrefix~"finished tick", this.meta);
+            Log.msg(LL.FDebug, this, "finished tick", this.meta);
         } catch(Throwable thr) {
-            Log.msg(LL.Info, this.logPrefix~"handling error", thr, this.meta);
+            Log.msg(LL.Info, this, "handling error", thr, this.meta);
             this.thr = thr;
             this.error(this.thr);
 
-            Log.msg(LL.FDebug, this.logPrefix~"finished handling error", this.meta);
+            Log.msg(LL.FDebug, this, "finished handling error", this.meta);
         }
         
         this.meta.time = Clock.currStdTime; // set endtime for informing pool
@@ -85,7 +90,7 @@ abstract class Tick {
         this.thr = thr;
 
         // if even handling exception failes notify that an error occured
-        Log.msg(LL.Error, this.logPrefix~"handling error failed", thr);
+        Log.msg(LL.Error, this, "handling error failed", thr);
         
         this.entity.damage(thr); // BOOM BOOM BOOM
 
@@ -94,12 +99,12 @@ abstract class Tick {
     }
     
     /// invoke tick
-    protected bool invoke(string tick, Data data = null) {
+    protected final bool invoke(string tick, Data data = null) {
         return this.invoke(tick, Duration.init, data);
     }
 
     /// invoke tick with delay
-    protected bool invoke(string tick, SysTime schedule, Data data = null) {
+    protected final bool invoke(string tick, SysTime schedule, Data data = null) {
         import std.datetime.systime : Clock;
 
         auto delay = schedule - Clock.currTime;
@@ -111,7 +116,7 @@ abstract class Tick {
     }
 
     /// invoke tick with delay
-    protected bool invoke(string tick, Duration delay, Data data = null) {
+    protected final bool invoke(string tick, Duration delay, Data data = null) {
         import flow.core.gears.error : TickException;
         import std.datetime.systime : Clock;
 
@@ -143,7 +148,7 @@ abstract class Tick {
     }
 
     /// gets the entity controller of a given entity located in common space
-    protected EntityController get(EntityPtr entity) {
+    protected final EntityController get(EntityPtr entity) {
         import flow.core.gears.error : TickException;
 
         if(entity.space != this.entity.space.meta.id)
@@ -151,7 +156,7 @@ abstract class Tick {
         else return this.get(entity.id);
     }
 
-    private EntityController get(string e) {
+    private final EntityController get(string e) {
         import flow.core.gears.error : TickException;
 
         if(this.meta.control) {
@@ -162,7 +167,7 @@ abstract class Tick {
     }
 
     /// spawns a new entity in common space
-    protected EntityController spawn(EntityMeta entity) {
+    protected final EntityController spawn(EntityMeta entity) {
         import flow.core.gears.error : TickException;
 
         if(this.meta.control)
@@ -171,7 +176,7 @@ abstract class Tick {
     }
 
     /// kills a given entity in common space
-    protected void kill(EntityPtr ptr) {
+    protected final void kill(EntityPtr ptr) {
         import flow.core.gears.error : TickException;
         
         if(this.meta.control) {
@@ -181,7 +186,7 @@ abstract class Tick {
         } else throw new TickException("tick is not in control");
     }
 
-    private void kill(string e) {
+    private final void kill(string e) {
         import flow.core.gears.error : TickException;
         
         if(this.meta.control) {
@@ -193,7 +198,7 @@ abstract class Tick {
     }
 
     /// spawns a new entity in common space
-    protected UUID attach(JunctionMeta junction) {
+    protected final UUID attach(JunctionMeta junction) {
         import flow.core.gears.error : TickException;
 
         if(this.meta.control)
@@ -201,7 +206,7 @@ abstract class Tick {
         else throw new TickException("tick is not in control");
     }
 
-    protected void detach(UUID jid) {
+    protected final void detach(UUID jid) {
         import flow.core.gears.error : TickException;
         
         if(this.meta.control) {
@@ -210,7 +215,7 @@ abstract class Tick {
     }
 
     /// registers a receptor for signal which invokes a tick
-    protected void register(string signal, string tick) {
+    protected final void register(string signal, string tick) {
         import flow.core.gears.error : TickException;
         import flow.core.data : createData;
         
@@ -221,13 +226,13 @@ abstract class Tick {
         this.entity.register(signal, tick);
     }
 
-    /// deregisters an receptor for signal invoking tick
-    protected void deregister(string signal, string tick) {
-        this.entity.deregister(signal, tick);
+    /// unregisters an receptor for signal invoking tick
+    protected final void unregister(string signal, string tick) {
+        this.entity.unregister(signal, tick);
     }
 
     /// send an unicast signal to a destination
-    protected bool send(Unicast s, string entity, string space, UUID group = UUID.init) {
+    protected final bool send(Unicast s, string entity, string space, UUID group = UUID.init) {
         auto eptr = new EntityPtr;
         eptr.id = entity;
         eptr.space = space;
@@ -235,7 +240,7 @@ abstract class Tick {
     }
 
     /// send an unicast signal to a destination
-    protected bool send(Unicast s, EntityPtr e = null, UUID group = UUID.init) {
+    protected final bool send(Unicast s, EntityPtr e = null, UUID group = UUID.init) {
         import flow.core.gears.error : TickException;
         
         if(s is null)
@@ -253,7 +258,7 @@ abstract class Tick {
     }
 
     /// send an anycast signal to spaces matching space pattern
-    protected bool send(Anycast s, string dst = string.init, UUID group = UUID.init) {
+    protected final bool send(Anycast s, string dst = string.init, UUID group = UUID.init) {
         import flow.core.gears.error : TickException;
         
         if(dst != string.init) s.dst = dst;
@@ -268,7 +273,7 @@ abstract class Tick {
     }
 
     /// send an anycast signal to spaces matching space pattern
-    protected bool send(Multicast s, string dst = string.init, UUID group = UUID.init) {
+    protected final bool send(Multicast s, string dst = string.init, UUID group = UUID.init) {
         import flow.core.gears.error : TickException;
         
         if(dst != string.init) s.dst = dst;
@@ -283,32 +288,32 @@ abstract class Tick {
     }
 
     /// checks if path exists in entities filesystem root
-    bool exists(string name) {
+    protected final bool exists(string name) {
         return this.entity.exists(name);
     }
 
     /// gets the file info of a file in entities filesystem root
-    FileInfo getInfo(string name) {
+    protected final FileInfo getInfo(string name) {
         return this.entity.getInfo(name);
     }
 
     /// writes a file in entities filesystem root
-    void write(string name, const void[] buffer) {
+    protected final void write(string name, const void[] buffer) {
         this.entity.write(name, buffer);
     }
 
     /// appends to a file in entities filesystem root
-    void append(string name, const void[] buffer) {
+    protected final void append(string name, const void[] buffer) {
         this.entity.append(name, buffer);
     }
 
     /// reads a file in entities filesystem root
-    void[] read(string name, size_t upTo = size_t.max) {
+    protected final void[] read(string name, size_t upTo = size_t.max) {
         return this.entity.read(name, upTo);
     }
 
     /// removes a file in entities filesystem root
-    void remove(string name) {
+    protected final void remove(string name) {
         this.entity.remove(name);
     }
 }
@@ -320,36 +325,6 @@ final class EntityLoadSystemTick : Tick {}
 final class SpaceFreezeSystemTick : Tick {}
 final class SpaceStoreSystemTick : Tick {}
 final class SpaceLoadSystemTick : Tick {}
-
-/// gets the prefix string of ticks for logging
-string logPrefix(Tick t) {
-    import std.conv : to;
-    return "tick@entity("~t.entity.meta.ptr.addr~"): ";
-}
-
-/// gets the prefix string of junctions for logging
-string logPrefix(Channel c) {
-    import std.conv : to;
-    return "channel("~c.own.meta.id.to!string~"->"~c.dst~"): ";
-}
-
-/// gets the prefix string of junctions for logging
-string logPrefix(Junction j) {
-    import std.conv : to;
-    return "junction("~j.meta.id.to!string~"): ";
-}
-
-/// gets the prefix string of junctions for logging
-string logPrefix(Entity e) {
-    import std.conv : to;
-    return "entity("~e.meta.ptr.addr~"): ";
-}
-
-/// gets the prefix string of junctions for logging
-string logPrefix(Space s) {
-    import std.conv : to;
-    return "space("~s.meta.id.to!string~"): ";
-}
 
 private TickMeta createTickMeta(string type, UUID group = UUID.init) {
     import flow.core.gears.data : TickMeta, TickInfo;
@@ -365,7 +340,7 @@ private TickMeta createTickMeta(string type, UUID group = UUID.init) {
 }
 
 /// hosts an entity construct
-private class Entity : StateMachine!SystemState {
+package class Entity : StateMachine!SystemState, ILogable {
     private import core.sync.mutex : Mutex;
     private import core.sync.rwmutex : ReadWriteMutex;
     private import flow.core.data;
@@ -382,6 +357,11 @@ private class Entity : StateMachine!SystemState {
     EntityController control;
 
     Data[][TypeInfo] aspects;
+
+    @property string logPrefix() {
+        import std.conv : to;
+        return "entity("~this.meta.ptr.addr~")";
+    }
 
     this(Space s, EntityMeta m) {
         super();
@@ -453,35 +433,35 @@ private class Entity : StateMachine!SystemState {
                             if(control)
                                 this.space.ops.async(this.space.ctlProc, &this.freeze); // async for avoiding deadlock
                             else
-                                Log.msg(LL.Warning, this.logPrefix~"non controlling tick tired to freeze entity", next.previous);
+                                Log.msg(LL.Warning, this, "non controlling tick tired to freeze entity", next.previous);
                             break;
                         case fqn!EntityStoreSystemTick:
                             auto control = next.control;
                             if(control)
                                 this.space.ops.async(this.space.ctlProc, {this.space.store(this.meta.ptr.id);}); // async for avoiding deadlock
                             else
-                                Log.msg(LL.Warning, this.logPrefix~"non controlling tick tired to store entity", next.previous);
+                                Log.msg(LL.Warning, this, "non controlling tick tired to store entity", next.previous);
                             break;
                         case fqn!EntityHibernateSystemTick:
                             auto control = next.control;
                             if(control)
                                 this.space.ops.async(this.space.ctlProc, {this.space.hibernate(this.meta.ptr.id);}); // async for avoiding deadlock
                             else
-                                Log.msg(LL.Warning, this.logPrefix~"non controlling tick tired to hibernate entity", next.previous);
+                                Log.msg(LL.Warning, this, "non controlling tick tired to hibernate entity", next.previous);
                             break;
                         case fqn!SpaceFreezeSystemTick:
                             auto control = next.control;
                             if(control)
                                 this.space.process.ops.async(this.space.process.ctlProc, &this.space.freeze); // async for avoiding deadlock
                             else
-                                Log.msg(LL.Warning, this.logPrefix~"non controlling tick tired to freeze space", next.previous);
+                                Log.msg(LL.Warning, this, "non controlling tick tired to freeze space", next.previous);
                             break;
                         case fqn!SpaceStoreSystemTick:
                             auto control = next.control;
                             if(control)
                                 this.space.process.ops.async(this.space.process.ctlProc, &this.space.store); // async for avoiding deadlock
                             else
-                                Log.msg(LL.Warning, this.logPrefix~"non controlling tick tired to store space", next.previous);
+                                Log.msg(LL.Warning, this, "non controlling tick tired to store space", next.previous);
                             break;
                         default:
                             this.exec(this.pop(next));
@@ -763,8 +743,8 @@ private class Entity : StateMachine!SystemState {
         }
     }
 
-    /// deregisters a receptor if registerd
-    void deregister(string s, string t) {
+    /// unregisters a receptor if registerd
+    void unregister(string s, string t) {
         import std.algorithm.mutation : remove;
 
         synchronized(this.meta.writer) {
@@ -791,8 +771,8 @@ private class Entity : StateMachine!SystemState {
         }
     }
 
-    /// deregisters an event if registerd
-    void deregister(EventType et, string t) {
+    /// unregisters an event if registerd
+    void unregister(EventType et, string t) {
         import std.algorithm.mutation : remove;
 
         synchronized(this.meta.writer) {
@@ -1021,9 +1001,9 @@ class EntityController {
         this._entity.register(signal, tick);
     }
 
-    /// deregisters an receptor for signal invoking tick
-    protected void deregister(string signal, string tick) {
-        this._entity.deregister(signal, tick);
+    /// unregisters an receptor for signal invoking tick
+    protected void unregister(string signal, string tick) {
+        this._entity.unregister(signal, tick);
     }
 
     /// send an unicast signal to a destination
@@ -1132,38 +1112,53 @@ private struct PkgData {
     ubyte[] sig;
 }
 
-abstract class Channel {
+abstract class Channel : ILogable {
     private string _dst;
     private Junction _own;
     private JunctionInfo _other;
     private bool _verified; // just telling that handshake was done not if it was successful
+    
+    private Operator _ops;
+    final @property Operator ops() {return this._ops;}
 
     protected @property Junction own() {return this._own;}
     abstract @property ubyte[] auth();
 
-    @property string dst() {return this._dst;}
+    final @property string dst() {return this._dst;}
     @property JunctionInfo other() {return this._other;}
+
+    @property string logPrefix() {
+        import std.conv : to;
+        return "channel("~this.own.meta.id.to!string~" -> "~this.dst~")";
+    }
     
-    this(string dst, Junction own) {        
+    this(string dst, Junction own) {
+        this._ops = new Operator;    
+
         this._dst = dst;
         this._own = own;
     }
 
-    private void ensureHandshake() {
-        synchronized if(!this._verified)
+    private final void ensureHandshake() {
+        scope(exit) this.ops.checkin();
+        synchronized if(!this._verified) {
+            this.ops.checkout();
             this.handshake();
+        }
     }
 
-    final void handshake() {
+    private final void handshake() {
         import std.range : empty, front;
+        scope(exit) this.ops.checkin();
 
         // establish channel only if both side verifies
         if(this.reqVerify()) {
+            this.ops.checkout();
             // authentication was accepted so authenticate the peer
             if(this.verify()) {
-                Log.msg(LL.Message, this.own.logPrefix~"handshake between \""~this.own.meta.info.space~"\" and \""~this.dst~"\" succeeded");
+                Log.msg(LL.Message, this, "handshake between \""~this.own.meta.info.space~"\" and \""~this.dst~"\" succeeded");
             } else {
-                Log.msg(LL.Message, this.own.logPrefix~"handshake between \""~this.own.meta.info.space~"\" and \""~this.dst~"\" failed");
+                Log.msg(LL.Message, this, "handshake between \""~this.own.meta.info.space~"\" and \""~this.dst~"\" failed");
             }
         }
 
@@ -1173,6 +1168,7 @@ abstract class Channel {
     final bool verify() {
         import msgpack : unpack;
         import std.range : empty, front;
+        scope(exit) this.ops.checkin();
 
         auto d = this.auth.unpack!AuthData;
 
@@ -1201,7 +1197,10 @@ abstract class Channel {
 
     final bool pull(/*w/o ref*/ ubyte[] pkg) {
         import msgpack : unpack;
+        scope(exit) this.ops.checkin();
+
         if(this._other !is null) { // only if verified
+
             auto d = pkg.unpack!PkgData;
             
             // if other has a crt then (encrypted) data has to be signed correct
@@ -1220,6 +1219,8 @@ abstract class Channel {
 
     private final bool push(Signal s) {
         import msgpack : pack;
+        scope(exit) this.ops.checkin();
+        
         if(this._other !is null) { // only if verified
             PkgData d;
             d.data = s.bin;
@@ -1240,32 +1241,31 @@ abstract class Channel {
     }
 
     /// request authentication
-    abstract protected bool reqVerify();
+    abstract protected bool reqVerify(); // only called internal, needs no op
 
     /// transports signal through channel
-    abstract protected bool transport(ref ubyte[] p);
+    abstract protected bool transport(ref ubyte[] pkg); // only called internal, needs no op
 
     /// clean up called in destructor
     protected void dispose() {
+        this.ops.join();
+
         this.destroy;
     }
 }
 
 /// allows signals from one space to get shipped to other spaces
-abstract class Junction : StateMachine!JunctionState {
+abstract class Junction : StateMachine!JunctionState, ILogable {
     private JunctionMeta _meta;
     private Space _space;
     private string[] destinations;
     private Crypto crypto;
     private ubyte[] _auth;
-    private Operator _ops;
-
-    final @property Processor proc() {return this._space.ctlProc;}
-    final @property Operator ops() {return this._ops;}
+    
     protected @property JunctionMeta meta() {return this._meta;}
-    @property string space() {return this._space.meta.id;}
+    final @property string space() {return this._space.meta.id;}
 
-    @property ubyte[] auth() {
+    final @property ubyte[] auth() {
         if(this._auth is null) {
             import flow.core.data : bin;
             import msgpack : pack;
@@ -1281,17 +1281,19 @@ abstract class Junction : StateMachine!JunctionState {
         return this._auth;
     }
 
+    @property string logPrefix() {
+        import std.conv : to;
+        return "junction("~this.meta.id.to!string~")";
+    }
+
     /// ctor
     this() {
-        this._ops = new Operator;
         super();
     }
     
     void dispose() {
         if(this.state != JunctionState.Attached)
             this.detach();
-
-        this.ops.join();
         
         this.destroy;
     }
@@ -1331,7 +1333,6 @@ abstract class Junction : StateMachine!JunctionState {
         switch(n) {
             case JunctionState.Detached:
             if(this.meta) {
-                this.ops.join();
                 this.down();
                 this.deinitCrypto();
             }
@@ -1358,6 +1359,10 @@ abstract class Junction : StateMachine!JunctionState {
     private bool push(Signal s, Channel c) {
         import flow.core.data : bin;
         
+        // one for ensureHandshake, one for push
+        c.ops.checkout();
+        c.ops.checkout();
+        
         c.ensureHandshake();
 
         // channel init might have failed, do not segfault because of that
@@ -1366,13 +1371,17 @@ abstract class Junction : StateMachine!JunctionState {
                 if(s.allowed(this.meta.info, c.other)) {
                     // it gets done async returns true
                     if(this.meta.info.indifferent) {
-                        this.ops.async(this.proc, {c.push(s);});
+                        this._space.ops.async(this._space.actProc, {c.push(s);});
                         return true;
                     } else {
                         return c.push(s);
                     }
-                } else return false;
-        } return false;
+                }
+        }
+
+        // didn't push, so release
+        c.ops.checkin();
+        return false;
     }
 
     /// pulls a signal from a channel
@@ -1383,7 +1392,7 @@ abstract class Junction : StateMachine!JunctionState {
             /* do not allow measuring of runtimes timings
             ==> make the call async and dada */
             if(this.meta.info.hiding) {
-                this.ops.async(this.proc, {this.route(s);});
+                this._space.ops.async(this._space.actProc, {this.route(s);});
                 return true;
             } else
                 return this.route(s);
@@ -1408,10 +1417,6 @@ abstract class Junction : StateMachine!JunctionState {
                 auto c = this.get(s.dst);
                 if(c !is null)
                     return this.push(s, c);
-                else foreach(j; this.list) {
-                    c = this.get(j);
-                    return c !is null ? this.push(s, c) : false;
-                }
             }
                     
         return false;
@@ -1425,10 +1430,6 @@ abstract class Junction : StateMachine!JunctionState {
                 auto c = this.get(s.dst);
                 if(c !is null)
                     ret = this.push(s, c) || ret;
-                else foreach(j; this.list) {
-                    c = this.get(j);
-                    ret = (c !is null ? this.push(s, c) : false) || ret;
-                }
             }
 
         return ret;
@@ -1442,7 +1443,7 @@ abstract class Junction : StateMachine!JunctionState {
         else if(s.as!Multicast !is null)
             return this._space.route(s.as!Multicast, this.meta.level);
         else {
-            Log.msg(LL.Warning, this.logPrefix~"should route unsupported signal -> refused", s);
+            Log.msg(LL.Warning, this, "should route unsupported signal -> refused", s);
             return false;
         }
     }
@@ -1503,7 +1504,7 @@ unittest { test.header("gears.engine: domain matching");
 test.footer(); }
 
 /// hosts a space which can host n entities
-class Space : StateMachine!SystemState {
+class Space : StateMachine!SystemState, ILogable {
     private import core.time : Duration;
     private import std.uuid : UUID;
 
@@ -1515,6 +1516,11 @@ class Space : StateMachine!SystemState {
 
     private Junction[UUID] junctions;
     private Entity[string] entities;
+
+    @property string logPrefix() {
+        import std.conv : to;
+        return "space("~this.meta.id.to!string~")";
+    }
 
     @property string fsroot() {
         import std.path : buildPath;
@@ -1610,7 +1616,7 @@ class Space : StateMachine!SystemState {
             try {
                 j.attach();
             } catch(Throwable thr) {
-                Log.msg(LL.Error, this.logPrefix~"couldn't attach to junction");
+                Log.msg(LL.Error, this, "couldn't attach to junction");
             }
         }
 
@@ -2061,13 +2067,13 @@ class Process {
         import std.conv : to;
         import std.file : exists;
         import std.path : expandTilde, buildPath;
-        import std.parallelism : totalCPUs;
+        //import std.parallelism : totalCPUs;
 
         if(cfg is null)
             cfg = new ProcessConfig;
 
         if(cfg.ctlPipes < 1)
-            cfg.ctlPipes = totalCPUs - 1;
+            cfg.ctlPipes = 1;//totalCPUs - 1;
 
         if(
             cfg.fsroot == string.init ||

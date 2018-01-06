@@ -1,4 +1,4 @@
-module flow.ipc.nanomsg.mesh;
+module flow.ipc.nanomsg.meshconn;
 
 private import core.atomic;
 private import core.stdc.errno;
@@ -63,22 +63,21 @@ class NanoMsgConnector : MeshConnector {
     /// ctor
     this() {
         this.sendBusLock = new Mutex;
-        super();
     }
     
     override protected bool create() {
         import msgpack : pack;
-        import std.conv : to;
-        import std.digest : toHexString;
 
         auto info = NanoMsgDest(this.meta.pullAddr);
 
         this._info = info.pack;
 
         try {
-            return this.initSocks();
+            auto r = this.initSocks();
+            debug Log.msg(LL.Debug, this, "created");
+            return r;
         } catch(Throwable thr) {
-            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") creating failed", thr);
+            Log.msg(LL.Error, this, "creating failed", thr);
             return false;
         }
     }
@@ -88,13 +87,10 @@ class NanoMsgConnector : MeshConnector {
     }
 
     protected override bool listen() {
-        import std.conv : to;
-        import std.digest : toHexString;
-
         this.recv();
         auto r = this.bind();
 
-        if(r) Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") bound successfully");
+        if(r) debug Log.msg(LL.Debug, this, "successfully started listening");
         return r;
     }
 
@@ -109,48 +105,46 @@ class NanoMsgConnector : MeshConnector {
             this.close(d.pushSock);
         this.close(this.pullSock);
         this.close(this.busSock);
+
+        debug Log.msg(LL.Debug, this, "successfully stopped listening");
     }
 
     private bool initSocks() {
         import std.conv : to;
-        import std.digest : toHexString;
 
         auto timeout = 100;
 
         this.busSock = nn_socket(AF_SP, NN_BUS);
         if(this.busSock < 0) {
-            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") creating bus failed: "~nn_err_strerror (errno).to!string);
+            Log.msg(LL.Error, this, "creating bus failed ["~nn_err_strerror (errno).to!string~"]");
             return false;
         } else
-            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") created bus "~this.busSock.to!string);
+            debug Log.msg(LL.Debug, this, "created bus "~this.busSock.to!string);
 
         if(nn_setsockopt(this.busSock, NN_SOL_SOCKET, NN_RCVTIMEO, &timeout, timeout.sizeof) < 0) {
-            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") setting bus timeout failed: "~nn_err_strerror (errno).to!string);
+            Log.msg(LL.Error, this, "setting bus timeout failed ["~nn_err_strerror (errno).to!string~"]");
             return false;
         }
 
         this.pullSock = nn_socket(AF_SP, NN_PULL);
         if(this.pullSock < 0) {
-            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") creating pull failed: "~nn_err_strerror (errno).to!string);
+            Log.msg(LL.Error, this, "creating pull failed ["~nn_err_strerror (errno).to!string~"]");
             return false;
         } else
-            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") created pull "~this.pullSock.to!string);
+            debug Log.msg(LL.Debug, this, "created pull "~this.pullSock.to!string);
 
         if(nn_setsockopt(this.pullSock, NN_SOL_SOCKET, NN_RCVTIMEO, &timeout, timeout.sizeof) < 0) {
-            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") setting pull timeout failed: "~nn_err_strerror (errno).to!string);
+            Log.msg(LL.Error, this, "setting pull timeout failed ["~nn_err_strerror (errno).to!string~"]");
             return false;
         }
 
         if(!this.createPush()) return false;
 
-        Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") initialized");
+        Log.msg(LL.Debug, this, "initialized");
         return true;
     }
 
     private bool createPush() {
-        import std.conv : to;
-        import std.digest : toHexString;
-
         foreach(i, d; this.dests) {
             d.pushLock = new Mutex;
             d.pushSock = this.connectPush(d.pullAddr);
@@ -161,14 +155,13 @@ class NanoMsgConnector : MeshConnector {
 
     private int connectPush(string push) {
         import std.conv : to;
-        import std.digest : toHexString;
         import std.string : toStringz;
 
         auto pushSock = nn_socket(AF_SP, NN_PUSH);
         if(pushSock < 0) {
-            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") creating push failed: "~nn_err_strerror (errno).to!string);
+            Log.msg(LL.Error, this, "creating push failed ["~nn_err_strerror (errno).to!string~"]");
         } else {
-            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") created push "~pushSock.to!string);
+            debug Log.msg(LL.Debug, this, "created push "~pushSock.to!string);
 
             int ep;
             for(size_t i = 0; i < this.meta.retry+1; i++) {
@@ -180,11 +173,11 @@ class NanoMsgConnector : MeshConnector {
             }
 
             if(ep < 0) {
-                Log.msg(LL.Info, "nanomsg("~this.id.toHexString.to!string~") connecting to push failed: "~nn_err_strerror (errno).to!string);
+                Log.msg(LL.Info, this, "connecting to push failed ["~nn_err_strerror (errno).to!string~"]");
                 this.close(pushSock);
                 pushSock = -1;
             } else
-                Log.msg(LL.Message, "nanomsg("~this.id.toHexString.to!string~") connected to push "~push~" as endpoint "~ep.to!string);
+                Log.msg(LL.Message, this, "connected to push "~push~" as endpoint "~ep.to!string);
         }
 
 
@@ -196,41 +189,38 @@ class NanoMsgConnector : MeshConnector {
 
     private bool bind() {
         import std.conv : to;
-        import std.digest : toHexString;
         import std.string : toStringz;
 
         if(nn_bind(this.busSock, this.meta.listen.toStringz) < 0) {
-            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") binding bus failed: "~nn_err_strerror (errno).to!string);
+            Log.msg(LL.Error, this, "binding bus failed ["~nn_err_strerror (errno).to!string~"]");
             return false;
         } else
-            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") listening to bus "~this.meta.listen);
+            debug Log.msg(LL.Debug, this, "listening to bus "~this.meta.listen);
 
         if(nn_bind(this.pullSock, this.meta.pullListen.toStringz) < 0) {
-            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") binding to pull failed: "~nn_err_strerror (errno).to!string);
+            Log.msg(LL.Error, this, "binding to pull failed ["~nn_err_strerror (errno).to!string~"]");
             return false;
         } else
-            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") listening to pull "~this.meta.pullListen);
+            debug Log.msg(LL.Debug, this, "listening to pull "~this.meta.pullListen);
 
         return true;
     }
 
     private void close(int sock) {
         import std.conv : to;
-        import std.digest : toHexString;
 
         int rc;
         while(rc != 0 && errno != EBADF && errno != EINVAL && errno != ETERM)
             rc = nn_close(sock);
         if(rc != 0)
-            Log.msg(LL.Warning, "nanomsg("~this.id.toHexString.to!string~") closing socket failed: "~nn_err_strerror (errno).to!string);
+            Log.msg(LL.Warning, this, "closing socket failed ["~nn_err_strerror (errno).to!string~"]");
         else
-            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") closed socket "~sock.to!string);
+            debug Log.msg(LL.Debug, this, "closed socket "~sock.to!string);
     }
 
     protected override bool connect(string addr) {
         import std.algorithm.searching : any;
         import std.conv : to;
-        import std.digest : toHexString;
         import std.string : toStringz;
 
         if(addr != this.addr) {
@@ -244,10 +234,11 @@ class NanoMsgConnector : MeshConnector {
             }
 
             if(ep < 0) {
-                Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") adding bus endpoint "~addr~" failed: "~nn_err_strerror (errno).to!string);
+                Log.msg(LL.Error, this, "adding bus endpoint "~addr~" failed ["~nn_err_strerror (errno).to!string~"]");
                 return false;
-            } else
-                Log.msg(LL.Message, "nanomsg("~this.id.toHexString.to!string~") added endpoint "~addr~" as "~ep.to!string~" (doesn't mean its connected)");
+            } else {
+                debug Log.msg(LL.Debug, this, "added endpoint "~addr~" as "~ep.to!string~" (doesn't mean its connected)");
+            }
         }
         
         if(this.meta.wait > 0.hnsecs)
@@ -281,6 +272,8 @@ class NanoMsgConnector : MeshConnector {
                 this.recv(this.pullSock, f, r);
             }
         }).start();
+
+        debug Log.msg(LL.Debug, this, "started recv listener"); 
     }
 
     private void handle(ubyte[] pkg) {
@@ -291,32 +284,31 @@ class NanoMsgConnector : MeshConnector {
         MsgData msg;
         try {msg = pkg.unpack!MsgData;}
         catch(Throwable thr) {
-            Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") deserializing message failed", thr);
+            Log.msg(LL.Error, this, "deserializing message failed", thr);
         }
-        debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") recv("~msg.id.to!string~", "~msg.code.to!string~") from "~msg.src.toHexString.to!string);
+        debug Log.msg(LL.Debug, this, "recv("~msg.id.to!string~", "~msg.code.to!string~") from "~msg.src.toHexString.to!string);
         super.handle(msg);
     }
 
     private void recv(int sock, void delegate(ubyte[]) f, void delegate() err) {
         import std.conv : to;
-        import std.digest : toHexString;
 
         void* buf;
         int rc = nn_recv (sock, &buf, NN_MSG, 0);
 
         // somewhere a deadlock? check it err() is executed on all alternative paths
         if(rc >= 0) {
-            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") recv "~rc.to!string~" bytes via "~sock.to!string);
+            debug Log.msg(LL.Debug, this, "recv "~rc.to!string~" bytes via "~sock.to!string);
             scope(exit) nn_freemsg (buf);
             auto pkg = buf.as!(ubyte*)[0..rc].as!(ubyte[]).dup;
             this.ops.async(this.proc, {f(pkg);});
         } else {
             if(errno == EBADF) {
-                debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") recv failed because of invalid socket: "~nn_err_strerror (errno).to!string~"["~errno.to!string~"]");
+                debug Log.msg(LL.Debug, this, "recv failed because of invalid socket ["~nn_err_strerror (errno).to!string~"]");
             } else if(errno == EINTR) {
-                Log.msg(LL.Warning, "nanomsg("~this.id.toHexString.to!string~") recv failed because of interrupted socket: "~nn_err_strerror (errno).to!string~"["~errno.to!string~"]");
+                Log.msg(LL.Warning, this, "recv failed because of interrupted socket ["~nn_err_strerror (errno).to!string~"]");
             } else if(errno != ETIMEDOUT) {
-                Log.msg(LL.Error, "nanomsg("~this.id.toHexString.to!string~") recv failed: "~nn_err_strerror (errno).to!string~"["~errno.to!string~"]");
+                Log.msg(LL.Error, this, "recv failed ["~nn_err_strerror (errno).to!string~"]");
             }
                 
             err();
@@ -331,24 +323,24 @@ class NanoMsgConnector : MeshConnector {
         auto r = false;
         // if there is no channel or channel requires passive connection
         if(msg.dst == this.sysId || msg.dst !in this.dests || this.dests[msg.dst].pushSock < 0) synchronized(this.sendBusLock) {
-            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") sending("~msg.id.to!string~", "~msg.code.to!string~") to "~msg.dst.toHexString.to!string~" via "~this.busSock.to!string);
+            debug Log.msg(LL.Debug, this, "sending("~msg.id.to!string~", "~msg.code.to!string~") to "~msg.dst.toHexString.to!string~" via "~this.busSock.to!string);
             auto pkg = msg.pack;
             r = nn_send (this.busSock, pkg.ptr, pkg.length, 0) == pkg.length;
         } else {
             auto d = this.dests[msg.dst];
             synchronized(d.pushLock) {
                 debug 
-                    Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") sending("~msg.id.to!string~", "~msg.code.to!string~") to "~msg.dst.toHexString.to!string~" via "~d.pushSock.to!string);
+                    Log.msg(LL.Debug, this, "sending("~msg.id.to!string~", "~msg.code.to!string~") to "~msg.dst.toHexString.to!string~" via "~d.pushSock.to!string);
                 auto pkg = msg.pack;
                 r = nn_send (d.pushSock, pkg.ptr, pkg.length, 0) == pkg.length;
             }
         }
 
         if(r) {
-            debug Log.msg(LL.Debug, "nanomsg("~this.id.toHexString.to!string~") sent("~msg.id.to!string~", "~msg.code.to!string~") to "~msg.dst.toHexString.to!string);
+            debug Log.msg(LL.Debug, this, "sent("~msg.id.to!string~", "~msg.code.to!string~") to "~msg.dst.toHexString.to!string);
             return true;
         } else {
-            Log.msg(LL.Warning, "nanomsg("~this.id.toHexString.to!string~") send("~msg.id.to!string~") failed: "~nn_err_strerror (errno).to!string);
+            Log.msg(LL.Warning, this, "send("~msg.id.to!string~") failed ["~nn_err_strerror (errno).to!string~"]");
             return false;
         }
     }
@@ -378,7 +370,7 @@ unittest { test.header("ipc.nanomsg.mesh: fully enabled passing of signals via i
     scope(exit)
         proc.dispose();
 
-    //Log.level = LL.Debug;
+    Log.level = LL.Debug;
 
     auto spc1Domain = "spc1.test.inproc.gears.core.flow";
     auto spc2Domain = "spc2.test.inproc.gears.core.flow";
@@ -399,7 +391,7 @@ unittest { test.header("ipc.nanomsg.mesh: fully enabled passing of signals via i
     conn1.listen = "inproc://j1bus";
     conn1.pullListen = "inproc://j1pull";
     conn1.pullAddr = "inproc://j1pull";
-    sm1.addMeshJunction(junctionId, "inproc://j1bus", [], conn1, 10);
+    sm1.addMeshJunction(junctionId, "inproc://j1bus", [], conn1, 100);
 
     auto sm2 = createSpace(spc2Domain);
     auto emr = sm2.addEntity("receiving");
@@ -412,7 +404,7 @@ unittest { test.header("ipc.nanomsg.mesh: fully enabled passing of signals via i
     conn2.listen = "inproc://j2bus";
     conn2.pullListen = "inproc://j2pull";
     conn2.pullAddr = "inproc://j2pull";
-    sm2.addMeshJunction(junctionId, "inproc://j2bus", ["inproc://j1bus"], conn2, 10);
+    sm2.addMeshJunction(junctionId, "inproc://j2bus", ["inproc://j1bus"], conn2, 100);
     
     auto spc1 = proc.add(sm1);
     auto spc2 = proc.add(sm2);
@@ -421,7 +413,7 @@ unittest { test.header("ipc.nanomsg.mesh: fully enabled passing of signals via i
     spc2.tick();
     spc1.tick();
 
-    Thread.sleep(100.msecs);
+    Thread.sleep(500.msecs);
 
     spc2.freeze();
     spc1.freeze();
@@ -447,7 +439,7 @@ unittest { test.header("ipc.nanomsg.mesh: fully enabled passing of signals via t
     scope(exit)
         proc.dispose();
 
-    //Log.level = LL.Debug;
+    Log.level = LL.Debug;
 
     auto spc1Domain = "spc1.test.inproc.gears.core.flow";
     auto spc2Domain = "spc2.test.inproc.gears.core.flow";
