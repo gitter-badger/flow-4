@@ -51,8 +51,8 @@ Hosts m spaces. While a real OS process could in theory host multiple flow proce
 
 ## Structure of causality
 While the actor model is a quite powerful way to compute, the real power of flow lies in its theory of causality.
-It allows well defined causal chains to run through different entities across all integrated spaces.
-The designer is enabled to break down complex causality into single sequential chains and therefore create complex software without needing to overview its complexity as whole.
+It allows well defined causal branches to run through different entities across all integrated spaces.
+The designer is enabled to break down complex causality into single sequential branches and therefore create complex software without needing to overview its complexity as whole.
 
 Lets forget everything, empty your mind. So we can start with a few definitions.
 
@@ -83,5 +83,6 @@ Is a set of consecutive discrete ticks on data/signals or 1 continuous functiona
 In theory (not in flow) you can slice continuous functionality into an infinite amount of ticks.
 
 ### Definition of causality
-Is an integral set of causal chains.
+Is an integral set of causal branches.
+My assertion is, that for each causal branch, there exists at least one containing it.
 
