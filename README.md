@@ -5,7 +5,7 @@
 * [Credits](doc/credits.md)
 * [Howto file a bug](doc/howto_bug.md)
 
-for newest progress please see https://github.com/RalphBariz/flow
+newest rework progress please see https://github.com/RalphBariz/causal.git
 
 The whole project is licenced by [GNU Affero General Public License, Verison 3.0](https://github.com/RalphBariz/FLOW/blob/master/LICENSE) [Please read the notes in LICENCE file.]
 
