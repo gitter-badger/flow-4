@@ -22,3 +22,6 @@ Linux only
 
 **RUN:**  
 Dependent of the project you built, its binaries are located in a subfolder *bin* or *lib*
+
+
+[![Join the chat at https://gitter.im/causal-rt/flow](https://badges.gitter.im/causal-rt/flow.svg)](https://gitter.im/causal-rt/flow?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
